@@ -100,7 +100,7 @@ def test_login(client):
     post(client, "/salir")
     assert client.get("/").headers["Location"].endswith("/login")
     assert "incorrectos" in ingresar(client, "admin", "mal").get_data(as_text=True)
-    assert "Planilla" in ingresar(client, "admin", "secreto1").get_data(as_text=True)
+    assert "Cajas por turno" in ingresar(client, "admin", "secreto1").get_data(as_text=True)
 
 
 def test_post_sin_csrf_es_rechazado(client):
