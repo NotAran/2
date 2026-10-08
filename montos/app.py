@@ -7,7 +7,7 @@ de cuentas (filas) por personas (columnas) y se divide en:
   (la suma de todas las columnas).
 - Turno anterior: el turno actual de la caja anterior (se calcula solo).
 
-Resultado = turno anterior − (turno actual + bajada), y final = resultado − saldo. El admin define filas y columnas, crea usuarios y les asigna
+Resultado = turno anterior − (turno actual + bajada), y final = resultado + saldo. El admin define filas y columnas, crea usuarios y les asigna
 qué filas y columnas ven y cargan. Los datos se guardan en una base SQLite
 interna y se pueden descargar en Excel.
 """
@@ -373,7 +373,7 @@ def turno_actual(db, caja):
 
 
 def calcular_totales(anterior, actual, montos_extras):
-    """Cuenta de la caja: resultado = anterior − (actual + bajada); final = resultado − saldo."""
+    """Cuenta de la caja: resultado = anterior − (actual + bajada); final = resultado + saldo."""
     bajada = montos_extras.get("bajada", 0)
     saldo = montos_extras.get("deposito", 0) - montos_extras.get("retiro", 0)
     resultado = anterior - (actual + bajada)
@@ -383,7 +383,7 @@ def calcular_totales(anterior, actual, montos_extras):
         "bajada": bajada,
         "resultado": resultado,
         "saldo": saldo,
-        "final": resultado - saldo,
+        "final": resultado + saldo,
     }
 
 
@@ -393,7 +393,7 @@ def armar_caja(db, usuario, caja):
     Los totales son siempre de toda la caja (todas las filas y columnas):
     - Turno actual: suma (con signo) de los montos de esta caja.
     - Turno anterior: turno actual de la caja inmediatamente anterior.
-    - Resultado = turno anterior − (turno actual + bajada); final = resultado − saldo,
+    - Resultado = turno anterior − (turno actual + bajada); final = resultado + saldo,
       con saldo = depósito − retiro.
     La grilla muestra las filas y columnas asignadas al usuario: las activas, y las
     quitadas solo si tienen montos en esta caja.
@@ -601,7 +601,7 @@ def exportar():
         ("Bajada", f"=B{fila_extra['bajada']}"),
         ("Resultado", f"=B{r}-(B{r + 1}+B{r + 2})"),
         ("Saldo", f"=B{fila_extra['saldo']}"),
-        ("Final", f"=B{r + 3}-B{r + 4}"),
+        ("Final", f"=B{r + 3}+B{r + 4}"),
     )
     for k, (nombre, valor) in enumerate(resumen, start=r):
         ws.cell(row=k, column=1, value=nombre)

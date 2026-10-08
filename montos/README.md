@@ -25,7 +25,7 @@ todo se puede descargar en Excel.
     (0 si esa caja no tuvo montos). Se calcula solo.
 - **Cuenta de la caja** (arriba de todo):
   - Resultado = turno anterior − (turno actual + bajada)
-  - Final = resultado − saldo
+  - Final = resultado + saldo
 - **Otros datos del turno**: Depósito, Retiro, Bono, Saldo y Bajada, un monto de
   cada uno por caja. No suman en el turno actual. El saldo se calcula solo:
   depósito − retiro.

@@ -245,21 +245,21 @@ def test_turno_anterior_es_el_turno_actual_de_la_caja_previa(client):
 
 
 def test_cuenta_de_la_caja(client):
-    """turno anterior − (turno actual + bajada) = resultado; resultado − saldo = final."""
+    """turno anterior − (turno actual + bajada) = resultado; resultado + saldo = final."""
     crear_admin(client)
     cargar(client, "2026-10-08", "noche", Mercado__Paco="512.000")
     cargar(client, "2026-10-08", "manana", Mercado__Paco="57.000", Lemon__Antonio="13.500", Lemon__Ibra="-9.749,50")
     post(client, "/guardar", fecha="2026-10-08", turno="manana", x_bajada="150.000", x_deposito="200.000", x_retiro="35.000")
     assert caja("2026-10-08", "manana")["totales"] == {
         "anterior": 51200000, "actual": 6075050, "bajada": 15000000,
-        "resultado": 30124950, "saldo": 16500000, "final": 13624950,
+        "resultado": 30124950, "saldo": 16500000, "final": 46624950,
     }
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
-    assert "$301.249,50" in pagina and "$136.249,50" in pagina
+    assert "$301.249,50" in pagina and "$466.249,50" in pagina
 
     with montos.app.app_context():
         h = montos.historial(montos.get_db())
-    assert [(x["caja"][1], x["final"]) for x in h] == [(1, 13624950), (0, -51200000)]
+    assert [(x["caja"][1], x["final"]) for x in h] == [(1, 46624950), (0, -51200000)]
 
 
 def test_usuario_ve_los_totales_de_toda_la_caja(client):
@@ -399,7 +399,7 @@ def test_exportar_excel(client):
     assert ws["A13"].value == "Total" and ws["D13"].value == "=SUM(D4:D12)" and ws["E13"].value is None
     assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(15, 21)] == [
         ("Turno anterior", 1000), ("Turno actual", "=+B13+C13+D13"), ("Bajada", "=B27"),
-        ("Resultado", "=B15-(B16+B17)"), ("Saldo", "=B26"), ("Final", "=B18-B19"),
+        ("Resultado", "=B15-(B16+B17)"), ("Saldo", "=B26"), ("Final", "=B18+B19"),
     ]
     assert ws["A22"].value == "Otros datos del turno"
     assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(23, 28)] == [

@@ -45,7 +45,7 @@
     <div class="kpi"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
 
     <div class="kpi fila2"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
-    <span class="op">−</span>
+    <span class="op">+</span>
     <div class="kpi"><div class="k">Saldo</div><div class="v">{{ totales.saldo|dinero }}</div></div>
     <span class="op">=</span>
     <div class="kpi destacado"><div class="k">Final</div><div class="v {{ 'pos' if totales.final >= 0 else 'neg' }}">{{ totales.final|dinero }}</div></div>
