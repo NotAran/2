@@ -245,17 +245,19 @@ def test_turno_anterior_es_el_turno_actual_de_la_caja_previa(client):
 
 
 def test_cuenta_de_la_caja(client):
-    """turno anterior − (turno actual + bajada) = resultado; resultado + saldo = final."""
+    """turno anterior − (turno actual + bajada) = resultado; resultado + saldo = final; final − bono = total final."""
     crear_admin(client)
     cargar(client, "2026-10-08", "noche", Mercado__Paco="512.000")
     cargar(client, "2026-10-08", "manana", Mercado__Paco="57.000", Lemon__Antonio="13.500", Lemon__Ibra="-9.749,50")
-    post(client, "/guardar", fecha="2026-10-08", turno="manana", x_bajada="150.000", x_deposito="200.000", x_retiro="35.000")
+    post(client, "/guardar", fecha="2026-10-08", turno="manana",
+         x_bajada="150.000", x_deposito="200.000", x_retiro="35.000", x_bono="12.500")
     assert caja("2026-10-08", "manana")["totales"] == {
         "anterior": 51200000, "actual": 6075050, "bajada": 15000000,
-        "resultado": 30124950, "saldo": 16500000, "final": 46624950,
+        "resultado": 30124950, "saldo": 16500000, "final": 46624950, "bono": 1250000, "total_final": 45374950,
     }
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
-    assert "$301.249,50" in pagina and "$466.249,50" in pagina
+    assert "$301.249,50" in pagina and "$466.249,50" in pagina and "$453.749,50" in pagina
+    assert pagina.index("Cuentas de la caja") < pagina.index("Otros datos del turno")
 
     with montos.app.app_context():
         h = montos.historial(montos.get_db())
@@ -397,17 +399,18 @@ def test_exportar_excel(client):
     assert [ws.cell(row=3, column=i).value for i in range(1, 6)] == ["Cuenta", "Paco", "Antonio", "Ibra", None]
     assert ws["A4"].value == "Mercado" and ws["C4"].value == 250 and ws["E4"].value is None
     assert ws["A13"].value == "Total" and ws["D13"].value == "=SUM(D4:D12)" and ws["E13"].value is None
-    assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(15, 21)] == [
-        ("Turno anterior", 1000), ("Turno actual", "=+B13+C13+D13"), ("Bajada", "=B27"),
-        ("Resultado", "=B15-(B16+B17)"), ("Saldo", "=B26"), ("Final", "=B18+B19"),
+    assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(15, 23)] == [
+        ("Turno anterior", 1000), ("Turno actual", "=+B13+C13+D13"), ("Bajada", "=B29"),
+        ("Resultado", "=B15-(B16+B17)"), ("Saldo", "=B28"), ("Final", "=B18+B19"),
+        ("Bono", "=B27"), ("Total final", "=B20-B21"),
     ]
-    assert ws["A22"].value == "Otros datos del turno"
-    assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(23, 28)] == [
-        ("Depósito", None), ("Retiro", None), ("Bono", None), ("Saldo", "=B23-B24"), ("Bajada", None)
+    assert ws["A24"].value == "Otros datos del turno"
+    assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(25, 30)] == [
+        ("Depósito", None), ("Retiro", None), ("Bono", None), ("Saldo", "=B25-B26"), ("Bajada", None)
     ]
     hs = wb["Historial"]
-    assert [c.value for c in hs[3]][1:] == ["Mañana", 1000, 250, 0, 750, 0, 750]
+    assert [c.value for c in hs[3]][1:] == ["Mañana", 1000, 250, 0, 750, 0, 750, 0, 750]
 
     post(client, "/guardar", fecha="2026-10-08", turno="manana", x_bono="75")
     ws = load_workbook(io.BytesIO(client.get("/exportar.xlsx?fecha=2026-10-08&turno=manana").data))["Caja"]
-    assert ws["B25"].value == 75 and ws["B18"].value == "=B15-(B16+B17)"
+    assert ws["B27"].value == 75 and ws["B22"].value == "=B20-B21"

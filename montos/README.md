@@ -23,9 +23,10 @@ todo se puede descargar en Excel.
     y después se suman los totales de las columnas.
   - **Turno anterior**: el turno actual de la caja inmediatamente anterior
     (0 si esa caja no tuvo montos). Se calcula solo.
-- **Cuenta de la caja** (arriba de todo):
+- **Cuentas de la caja** (debajo de la grilla, encima de "Otros datos del turno"):
   - Resultado = turno anterior − (turno actual + bajada)
   - Final = resultado + saldo
+  - Total final = final − bono
 - **Otros datos del turno**: Depósito, Retiro, Bono, Saldo y Bajada, un monto de
   cada uno por caja. No suman en el turno actual. El saldo se calcula solo:
   depósito − retiro.

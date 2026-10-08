@@ -35,24 +35,6 @@
     {% endif %}
   </section>
 {% else %}
-  <section class="resumen">
-    <div class="kpi"><div class="k">Turno anterior</div><div class="v">{{ totales.anterior|dinero }}</div></div>
-    <span class="op">− (</span>
-    <div class="kpi"><div class="k">Turno actual</div><div class="v">{{ totales.actual|dinero }}</div></div>
-    <span class="op">+</span>
-    <div class="kpi"><div class="k">Bajada</div><div class="v">{{ totales.bajada|dinero }}</div></div>
-    <span class="op">) =</span>
-    <div class="kpi"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
-
-    <div class="kpi fila2"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
-    <span class="op">+</span>
-    <div class="kpi"><div class="k">Saldo</div><div class="v">{{ totales.saldo|dinero }}</div></div>
-    <span class="op">=</span>
-    <div class="kpi destacado"><div class="k">Final</div><div class="v {{ 'pos' if totales.final >= 0 else 'neg' }}">{{ totales.final|dinero }}</div></div>
-  </section>
-  {% if total_grilla != totales.actual %}
-    <p class="nota">Los totales de arriba son de toda la caja; abajo ves solo las filas y columnas que tenés asignadas.</p>
-  {% endif %}
 
   <form method="post" action="{{ url_for('guardar') }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -105,9 +87,35 @@
     </div>
     </section>
 
+    <h2 class="titulo-cuentas">Cuentas de la caja</h2>
+  <section class="resumen">
+    <div class="kpi"><div class="k">Turno anterior</div><div class="v">{{ totales.anterior|dinero }}</div></div>
+    <span class="op">− (</span>
+    <div class="kpi"><div class="k">Turno actual</div><div class="v">{{ totales.actual|dinero }}</div></div>
+    <span class="op">+</span>
+    <div class="kpi"><div class="k">Bajada</div><div class="v">{{ totales.bajada|dinero }}</div></div>
+    <span class="op">) =</span>
+    <div class="kpi"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
+
+    <div class="kpi fila2"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
+    <span class="op">+</span>
+    <div class="kpi"><div class="k">Saldo</div><div class="v">{{ totales.saldo|dinero }}</div></div>
+    <span class="op">=</span>
+    <div class="kpi"><div class="k">Final</div><div class="v {{ 'neg' if totales.final < 0 }}">{{ totales.final|dinero }}</div></div>
+
+    <div class="kpi fila2"><div class="k">Final</div><div class="v {{ 'neg' if totales.final < 0 }}">{{ totales.final|dinero }}</div></div>
+    <span class="op">−</span>
+    <div class="kpi"><div class="k">Bono</div><div class="v">{{ totales.bono|dinero }}</div></div>
+    <span class="op">=</span>
+    <div class="kpi destacado"><div class="k">Total final</div><div class="v {{ 'pos' if totales.total_final >= 0 else 'neg' }}">{{ totales.total_final|dinero }}</div></div>
+  </section>
+  {% if total_grilla != totales.actual %}
+    <p class="nota">Estas cuentas son de toda la caja; en la grilla ves solo las filas y columnas que tenés asignadas.</p>
+  {% endif %}
+
     <section class="card">
       <h2>Otros datos del turno</h2>
-      <p class="nota" style="margin:0 0 12px">No suman en el turno actual. La bajada y el saldo (depósito − retiro) se usan en la cuenta de arriba.</p>
+      <p class="nota" style="margin:0 0 12px">No suman en el turno actual. La bajada, el saldo (depósito − retiro) y el bono se usan en las cuentas de arriba.</p>
       <div class="extras">
         {% for campo, nombre in campos_extras %}
           {% set extra = extras.get(campo) %}
@@ -133,7 +141,7 @@
 <section class="card">
   <h2>Últimas cajas</h2>
   <div class="tabla"><table>
-    <thead><tr><th>Caja</th><th class="n">Turno anterior</th><th class="n">Turno actual</th><th class="n">Resultado</th><th class="n">Final</th></tr></thead>
+    <thead><tr><th>Caja</th><th class="n">Turno anterior</th><th class="n">Turno actual</th><th class="n">Resultado</th><th class="n">Final</th><th class="n">Total final</th></tr></thead>
     <tbody>
     {% for h in historial %}
       <tr class="{{ 'actual' if h.caja == caja }}">
@@ -142,6 +150,7 @@
         <td class="n">{{ h.actual|dinero }}</td>
         <td class="n {{ 'neg' if h.resultado < 0 }}">{{ h.resultado|dinero }}</td>
         <td class="n {{ 'neg' if h.final < 0 }}">{{ h.final|dinero }}</td>
+        <td class="n {{ 'neg' if h.total_final < 0 }}"><b>{{ h.total_final|dinero }}</b></td>
       </tr>
     {% endfor %}
     </tbody>

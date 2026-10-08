@@ -7,7 +7,8 @@ de cuentas (filas) por personas (columnas) y se divide en:
   (la suma de todas las columnas).
 - Turno anterior: el turno actual de la caja anterior (se calcula solo).
 
-Resultado = turno anterior − (turno actual + bajada), y final = resultado + saldo. El admin define filas y columnas, crea usuarios y les asigna
+Resultado = turno anterior − (turno actual + bajada), final = resultado + saldo
+y total final = final − bono. El admin define filas y columnas, crea usuarios y les asigna
 qué filas y columnas ven y cargan. Los datos se guardan en una base SQLite
 interna y se pueden descargar en Excel.
 """
@@ -373,9 +374,11 @@ def turno_actual(db, caja):
 
 
 def calcular_totales(anterior, actual, montos_extras):
-    """Cuenta de la caja: resultado = anterior − (actual + bajada); final = resultado + saldo."""
+    """Cuenta de la caja: resultado = anterior − (actual + bajada); final = resultado + saldo;
+    total final = final − bono."""
     bajada = montos_extras.get("bajada", 0)
     saldo = montos_extras.get("deposito", 0) - montos_extras.get("retiro", 0)
+    bono = montos_extras.get("bono", 0)
     resultado = anterior - (actual + bajada)
     return {
         "anterior": anterior,
@@ -384,6 +387,8 @@ def calcular_totales(anterior, actual, montos_extras):
         "resultado": resultado,
         "saldo": saldo,
         "final": resultado + saldo,
+        "bono": bono,
+        "total_final": resultado + saldo - bono,
     }
 
 
@@ -591,7 +596,7 @@ def exportar():
 
     # Resumen de la caja. Si el usuario ve toda la caja, el turno actual es la suma de los totales de las columnas.
     r = fila_total + 2
-    fila_extra = {campo: k for k, (campo, _) in enumerate(EXTRAS, start=r + 8)}
+    fila_extra = {campo: k for k, (campo, _) in enumerate(EXTRAS, start=r + 10)}
     completa = datos["total_grilla"] == totales["actual"]
     terminos = "".join(f"{'+' if c['signo'] > 0 else '-'}{letra[c['id']]}{fila_total}" for c in columnas)
     turno_actual_excel = f"={terminos or 0}"
@@ -602,13 +607,15 @@ def exportar():
         ("Resultado", f"=B{r}-(B{r + 1}+B{r + 2})"),
         ("Saldo", f"=B{fila_extra['saldo']}"),
         ("Final", f"=B{r + 3}+B{r + 4}"),
+        ("Bono", f"=B{fila_extra['bono']}"),
+        ("Total final", f"=B{r + 5}-B{r + 6}"),
     )
     for k, (nombre, valor) in enumerate(resumen, start=r):
         ws.cell(row=k, column=1, value=nombre)
         ws.cell(row=k, column=2, value=valor)
-    for k in (r + 3, r + 5):
+    for k in (r + 3, r + 5, r + 7):
         ws.cell(row=k, column=1).font = ws.cell(row=k, column=2).font = Font(bold=True)
-    ws.cell(row=r + 7, column=1, value="Otros datos del turno").font = Font(bold=True)
+    ws.cell(row=r + 9, column=1, value="Otros datos del turno").font = Font(bold=True)
     for campo, nombre in EXTRAS:
         extra = datos["extras"].get(campo)
         ws.cell(row=fila_extra[campo], column=1, value=nombre)
@@ -619,15 +626,16 @@ def exportar():
             c.number_format = FORMATO_MONEDA
 
     hs = wb.create_sheet("Historial")
-    campos = ("anterior", "actual", "bajada", "resultado", "saldo", "final")
-    hs.append(["Fecha", "Turno", "Turno anterior", "Turno actual", "Bajada", "Resultado", "Saldo", "Final"])
-    estilo_encabezado(hs, 1, 8)
-    for i in range(1, 9):
+    campos = ("anterior", "actual", "bajada", "resultado", "saldo", "final", "bono", "total_final")
+    hs.append(["Fecha", "Turno", "Turno anterior", "Turno actual", "Bajada", "Resultado", "Saldo", "Final", "Bono",
+               "Total final"])
+    estilo_encabezado(hs, 1, 10)
+    for i in range(1, 11):
         hs.column_dimensions[get_column_letter(i)].width = 12 if i <= 2 else 16
     for h in reversed(historial(db)):
         hs.append([h["caja"][0], TURNOS[h["caja"][1]][1]] + [h[c] / 100 for c in campos])
         hs.cell(row=hs.max_row, column=1).number_format = "dd/mm/yyyy"
-        for col in range(3, 9):
+        for col in range(3, 11):
             hs.cell(row=hs.max_row, column=col).number_format = FORMATO_MONEDA
 
     buffer = io.BytesIO()
