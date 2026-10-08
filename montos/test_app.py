@@ -180,26 +180,37 @@ def test_mover_entre_cajas():
     assert montos.nombre_caja((d, 1)) == "Jueves 08/10/2026 – Mañana"
 
 
-def test_turno_anterior_es_el_total_acumulado_de_la_caja_previa(client):
+def test_turno_anterior_es_el_turno_actual_de_la_caja_previa(client):
     crear_admin(client)
-    # el ejemplo acordado: noche Paco 150.000 + Antonio 80.000, mañana Paco 45.000 -> tarde arranca con 275.000
-    cargar(client, "2026-10-08", "noche", Mercado__Paco="150.000", Mercado__Antonio="80.000")
+    cargar(client, "2026-10-08", "noche", Mercado__Paco="150.000", Mercado__Antonio="80.000", Lemon__Ibra="-5.000")
     cargar(client, "2026-10-08", "manana", Mercado__Paco="45.000")
     noche, manana, tarde = (caja("2026-10-08", t) for t in ("noche", "manana", "tarde"))
-    assert noche["totales"] == {"anterior": 0, "actual": 23000000, "caja": 23000000, "con_bajada": 23000000}
-    assert manana["totales"] == {"anterior": 23000000, "actual": 4500000, "caja": 27500000, "con_bajada": 27500000}
-    assert tarde["totales"] == {"anterior": 27500000, "actual": 0, "caja": 27500000, "con_bajada": 27500000}
+    assert (noche["totales"]["anterior"], noche["totales"]["actual"]) == (0, 22500000)
+    assert (manana["totales"]["anterior"], manana["totales"]["actual"]) == (22500000, 4500000)
+    assert (tarde["totales"]["anterior"], tarde["totales"]["actual"]) == (4500000, 0)  # no acumula
+    # si la caja anterior no tuvo montos, arranca en 0
+    assert caja("2026-10-09", "manana")["totales"]["anterior"] == 0
+    # corregir una caja cambia el turno anterior de la siguiente
+    cargar(client, "2026-10-08", "manana", Mercado__Paco="50.000")
+    assert caja("2026-10-08", "tarde")["totales"]["anterior"] == 5000000
 
-    # suma todas las cuentas y columnas
-    cargar(client, "2026-10-08", "tarde", Lemon__Ibra="-5.000", Prex__Antonio="1.000")
-    assert caja("2026-10-09", "noche")["totales"]["anterior"] == 27100000
 
-    # corregir una caja vieja actualiza las siguientes
-    cargar(client, "2026-10-08", "noche", Mercado__Paco="160.000")
-    assert caja("2026-10-08", "tarde")["totales"]["anterior"] == 28500000
+def test_cuenta_de_la_caja(client):
+    """turno anterior − (turno actual + bajada) = resultado; resultado − saldo = final."""
+    crear_admin(client)
+    cargar(client, "2026-10-08", "noche", Mercado__Paco="512.000")
+    cargar(client, "2026-10-08", "manana", Mercado__Paco="57.000", Lemon__Antonio="13.500", Lemon__Ibra="-9.749,50")
+    post(client, "/guardar", fecha="2026-10-08", turno="manana", x_bajada="150.000", x_deposito="200.000", x_retiro="35.000")
+    assert caja("2026-10-08", "manana")["totales"] == {
+        "anterior": 51200000, "actual": 6075050, "bajada": 15000000,
+        "resultado": 30124950, "saldo": 16500000, "final": 13624950,
+    }
+    pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
+    assert "$301.249,50" in pagina and "$136.249,50" in pagina
 
-    pagina = client.get("/?fecha=2026-10-08&turno=tarde").get_data(as_text=True)
-    assert "$285.000,00" in pagina and "Miércoles" not in pagina and "Jueves 08/10/2026 – Tarde" in pagina
+    with montos.app.app_context():
+        h = montos.historial(montos.get_db())
+    assert [(x["caja"][1], x["final"]) for x in h] == [(1, 13624950), (0, -51200000)]
 
 
 def test_usuario_ve_los_totales_de_toda_la_caja(client):
@@ -212,7 +223,7 @@ def test_usuario_ve_los_totales_de_toda_la_caja(client):
     ingresar(client, "cajero", "clave123")
     cargar(client, "2026-10-08", "manana", Lemon__Ibra="50")
     d = caja("2026-10-08", "manana", usuario="cajero")
-    assert d["totales"] == {"anterior": 100000, "actual": 35000, "caja": 135000, "con_bajada": 135000}
+    assert (d["totales"]["anterior"], d["totales"]["actual"]) == (100000, 35000)
     assert d["total_grilla"] == 5000
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
     assert "son de toda la caja" in pagina and "Mercado" not in pagina
@@ -262,14 +273,14 @@ def test_otros_datos_saldo_y_total_con_bajada(client):
     assert {k: v["centavos"] for k, v in manana["extras"].items()} == {
         "deposito": 200000, "retiro": 70000, "bajada": 50000, "bono": 120050
     }
-    assert manana["saldo"] == 130000
-    # no entran en la caja; total + bajada solo se muestra
-    assert manana["totales"] == {"anterior": 100000, "actual": 0, "caja": 100000, "con_bajada": 150000}
-    assert caja("2026-10-08", "tarde")["totales"]["anterior"] == 100000
-    assert noche["extras"] == {} and noche["saldo"] == 0  # son de cada caja
+    # no suman en el turno actual; se usan en el resultado y el final
+    t = manana["totales"]
+    assert (t["actual"], t["bajada"], t["saldo"]) == (0, 50000, 130000)
+    assert caja("2026-10-08", "tarde")["totales"]["anterior"] == 0
+    assert noche["extras"] == {} and noche["totales"]["saldo"] == 0  # son de cada caja
 
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
-    assert 'value="1.200,50"' in pagina and "$1.300,00" in pagina and "$1.500,00" in pagina
+    assert 'value="1.200,50"' in pagina and "$1.300,00" in pagina
     assert 'name="x_saldo"' not in pagina
     orden = [pagina.index(f'name="x_{campo}"') for campo in ("deposito", "retiro", "bono", "bajada")]
     assert orden == sorted(orden)
@@ -278,7 +289,7 @@ def test_otros_datos_saldo_y_total_con_bajada(client):
     r = post(client, "/guardar", fecha="2026-10-08", turno="manana", x_retiro="", x_bono="abc")
     assert "Bono: «abc»" in r.get_data(as_text=True)
     manana = caja("2026-10-08", "manana")
-    assert set(manana["extras"]) == {"deposito", "bono", "bajada"} and manana["saldo"] == 200000
+    assert set(manana["extras"]) == {"deposito", "bono", "bajada"} and manana["totales"]["saldo"] == 200000
 
 
 def test_exportar_excel(client):
@@ -293,16 +304,17 @@ def test_exportar_excel(client):
     assert [ws.cell(row=3, column=i).value for i in range(1, 6)] == ["Cuenta", "Paco", "Antonio", "Ibra", "Total"]
     assert ws["A4"].value == "Mercado" and ws["C4"].value == 250 and ws["E4"].value == "=+B4+C4+D4"
     assert ws["A13"].value == "Total" and ws["E13"].value == "=SUM(E4:E12)"
-    assert [ws[f"A{i}"].value for i in (15, 16, 17)] == ["Turno anterior", "Turno actual", "Total caja"]
-    assert ws["B15"].value == 1000 and ws["B16"].value == "=E13" and ws["B17"].value == "=B15+B16"
-    assert ws["A18"].value == "Total + bajada" and ws["B18"].value == "=B17+B25"
-    assert ws["A20"].value == "Otros datos (no suman en la caja)"
-    assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(21, 26)] == [
-        ("Depósito", None), ("Retiro", None), ("Bono", None), ("Saldo", "=B21-B22"), ("Bajada", None)
+    assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(15, 21)] == [
+        ("Turno anterior", 1000), ("Turno actual", "=E13"), ("Bajada", "=B27"),
+        ("Resultado", "=B15-(B16+B17)"), ("Saldo", "=B26"), ("Final", "=B18-B19"),
+    ]
+    assert ws["A22"].value == "Otros datos del turno"
+    assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(23, 28)] == [
+        ("Depósito", None), ("Retiro", None), ("Bono", None), ("Saldo", "=B23-B24"), ("Bajada", None)
     ]
     hs = wb["Historial"]
-    assert [c.value for c in hs[3]][1:] == ["Mañana", 250, 1250]
+    assert [c.value for c in hs[3]][1:] == ["Mañana", 1000, 250, 0, 750, 0, 750]
 
     post(client, "/guardar", fecha="2026-10-08", turno="manana", x_bono="75")
     ws = load_workbook(io.BytesIO(client.get("/exportar.xlsx?fecha=2026-10-08&turno=manana").data))["Caja"]
-    assert ws["B23"].value == 75 and ws["B17"].value == "=B15+B16"
+    assert ws["B25"].value == 75 and ws["B18"].value == "=B15-(B16+B17)"

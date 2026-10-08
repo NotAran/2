@@ -3,11 +3,11 @@
 Cada día tiene 3 cajas (turnos noche, mañana y tarde). Cada caja es una planilla
 de cuentas (filas) por personas (columnas) y se divide en:
 
-- Turno anterior: un solo total, con el que cerró la caja anterior (se calcula solo).
-- Turno actual: los montos que se cargan en las columnas durante el turno.
+- Turno actual: los montos que se cargan en las columnas durante el turno
+  (la suma de todas las columnas).
+- Turno anterior: el turno actual de la caja anterior (se calcula solo).
 
-Total caja = turno anterior + turno actual, y pasa a ser el turno anterior de
-la caja siguiente. El admin define filas y columnas, crea usuarios y les asigna
+Resultado = turno anterior − (turno actual + bajada), y final = resultado − saldo. El admin define filas y columnas, crea usuarios y les asigna
 qué filas y columnas ven y cargan. Los datos se guardan en una base SQLite
 interna y se pueden descargar en Excel.
 """
@@ -312,18 +312,40 @@ def permitidas(db, usuario):
     return filas, columnas
 
 
+def turno_actual(db, caja):
+    """Suma (con signo) de todos los montos de una caja."""
+    return db.execute(
+        """SELECT COALESCE(SUM(ce.centavos * co.signo), 0) FROM celdas ce
+           JOIN columnas co ON co.id = ce.columna_id WHERE ce.fecha = ? AND ce.turno = ?""",
+        (caja[0].isoformat(), caja[1]),
+    ).fetchone()[0]
+
+
+def calcular_totales(anterior, actual, montos_extras):
+    """Cuenta de la caja: resultado = anterior − (actual + bajada); final = resultado − saldo."""
+    bajada = montos_extras.get("bajada", 0)
+    saldo = montos_extras.get("deposito", 0) - montos_extras.get("retiro", 0)
+    resultado = anterior - (actual + bajada)
+    return {
+        "anterior": anterior,
+        "actual": actual,
+        "bajada": bajada,
+        "resultado": resultado,
+        "saldo": saldo,
+        "final": resultado - saldo,
+    }
+
+
 def armar_caja(db, usuario, caja):
     """Datos y cálculos de una caja.
 
     Los totales son siempre de toda la caja (todas las filas y columnas):
-    - Turno anterior: total con el que cerró la caja anterior, es decir la suma
-      (con signo) de todos los montos de todas las cajas previas.
     - Turno actual: suma (con signo) de los montos de esta caja.
-    - Total caja = turno anterior + turno actual.
+    - Turno anterior: turno actual de la caja inmediatamente anterior.
+    - Resultado = turno anterior − (turno actual + bajada); final = resultado − saldo,
+      con saldo = depósito − retiro.
     La grilla muestra las filas y columnas asignadas al usuario: las activas, y las
-    quitadas solo si tienen montos en esta caja. Los extras (depósito, retiro, bono,
-    bajada) no entran en las sumas de la caja; saldo = depósito − retiro y
-    total + bajada = total caja + bajada (no pasa a la caja siguiente).
+    quitadas solo si tienen montos en esta caja.
     """
     fecha, turno = caja[0].isoformat(), caja[1]
     filas_ok, columnas_ok = permitidas(db, usuario)
@@ -334,22 +356,12 @@ def armar_caja(db, usuario, caja):
     filas = [f for f in filas_ok if f["activo"] or any(k[0] == f["id"] for k in celdas)]
     columnas = [c for c in columnas_ok if c["activo"] or any(k[1] == c["id"] for k in celdas)]
 
-    anterior, actual = db.execute(
-        """SELECT
-             COALESCE(SUM(CASE WHEN ce.fecha < ? OR (ce.fecha = ? AND ce.turno < ?) THEN ce.centavos * co.signo END), 0),
-             COALESCE(SUM(CASE WHEN ce.fecha = ? AND ce.turno = ? THEN ce.centavos * co.signo END), 0)
-           FROM celdas ce JOIN columnas co ON co.id = ce.columna_id""",
-        (fecha, fecha, turno, fecha, turno),
-    ).fetchone()
+    extras = {r["campo"]: r for r in db.execute("SELECT * FROM extras WHERE fecha = ? AND turno = ?", (fecha, turno))}
+    montos_extras = {campo: r["centavos"] for campo, r in extras.items()}
 
     def valor(f, c):
         celda = celdas.get((f["id"], c["id"]))
         return celda["centavos"] if celda else 0
-
-    extras = {r["campo"]: r for r in db.execute("SELECT * FROM extras WHERE fecha = ? AND turno = ?", (fecha, turno))}
-
-    def monto_extra(campo):
-        return extras[campo]["centavos"] if campo in extras else 0
 
     total_fila = {f["id"]: sum(valor(f, c) * c["signo"] for c in columnas) for f in filas}
     return {
@@ -360,28 +372,27 @@ def armar_caja(db, usuario, caja):
         "total_fila": total_fila,
         "total_columna": {c["id"]: sum(valor(f, c) for f in filas) for c in columnas},
         "total_grilla": sum(total_fila.values()),
-        "totales": {
-            "anterior": anterior,
-            "actual": actual,
-            "caja": anterior + actual,
-            "con_bajada": anterior + actual + monto_extra("bajada"),
-        },
+        "totales": calcular_totales(turno_actual(db, mover(caja, -1)), turno_actual(db, caja), montos_extras),
         "extras": extras,
-        "saldo": monto_extra("deposito") - monto_extra("retiro"),
     }
 
 
 def historial(db):
-    """Una entrada por caja con montos: turno actual y total al cierre (más nuevas primero)."""
-    saldo, filas = 0, []
-    for r in db.execute(
-        """SELECT ce.fecha, ce.turno, SUM(ce.centavos * co.signo) AS movimiento
-           FROM celdas ce JOIN columnas co ON co.id = ce.columna_id
-           GROUP BY ce.fecha, ce.turno ORDER BY ce.fecha, ce.turno"""
-    ):
-        saldo += r["movimiento"]
-        filas.append({"caja": (date.fromisoformat(r["fecha"]), r["turno"]), "actual": r["movimiento"], "cierre": saldo})
-    return filas[::-1]
+    """Una entrada por caja con datos, con sus totales (más nuevas primero)."""
+    actuales = {
+        (date.fromisoformat(r["fecha"]), r["turno"]): r["actual"]
+        for r in db.execute(
+            """SELECT ce.fecha, ce.turno, SUM(ce.centavos * co.signo) AS actual
+               FROM celdas ce JOIN columnas co ON co.id = ce.columna_id GROUP BY ce.fecha, ce.turno"""
+        )
+    }
+    extras = {}
+    for r in db.execute("SELECT fecha, turno, campo, centavos FROM extras"):
+        extras.setdefault((date.fromisoformat(r["fecha"]), r["turno"]), {})[r["campo"]] = r["centavos"]
+    return [
+        {"caja": caja, **calcular_totales(actuales.get(mover(caja, -1), 0), actuales.get(caja, 0), extras.get(caja, {}))}
+        for caja in sorted(set(actuales) | set(extras), reverse=True)
+    ]
 
 
 @app.get("/")
@@ -525,35 +536,41 @@ def exportar():
 
     # Resumen de la caja. Si el usuario ve toda la caja, el turno actual es la fórmula del total de la grilla.
     r = fila_total + 2
-    ws.cell(row=r, column=1, value="Turno anterior")
-    ws.cell(row=r, column=2, value=totales["anterior"] / 100)
-    ws.cell(row=r + 1, column=1, value="Turno actual")
+    fila_extra = {campo: k for k, (campo, _) in enumerate(EXTRAS, start=r + 8)}
     completa = datos["total_grilla"] == totales["actual"]
-    ws.cell(row=r + 1, column=2, value=f"={l_total}{fila_total}" if completa else totales["actual"] / 100)
-    ws.cell(row=r + 2, column=1, value="Total caja").font = Font(bold=True)
-    ws.cell(row=r + 2, column=2, value=f"=B{r}+B{r + 1}").font = Font(bold=True)
-    ws.cell(row=r + 5, column=1, value="Otros datos (no suman en la caja)").font = Font(bold=True)
-    fila_extra = {campo: k for k, (campo, _) in enumerate(EXTRAS, start=r + 6)}
+    resumen = (
+        ("Turno anterior", totales["anterior"] / 100),
+        ("Turno actual", f"={l_total}{fila_total}" if completa else totales["actual"] / 100),
+        ("Bajada", f"=B{fila_extra['bajada']}"),
+        ("Resultado", f"=B{r}-(B{r + 1}+B{r + 2})"),
+        ("Saldo", f"=B{fila_extra['saldo']}"),
+        ("Final", f"=B{r + 3}-B{r + 4}"),
+    )
+    for k, (nombre, valor) in enumerate(resumen, start=r):
+        ws.cell(row=k, column=1, value=nombre)
+        ws.cell(row=k, column=2, value=valor)
+    for k in (r + 3, r + 5):
+        ws.cell(row=k, column=1).font = ws.cell(row=k, column=2).font = Font(bold=True)
+    ws.cell(row=r + 7, column=1, value="Otros datos del turno").font = Font(bold=True)
     for campo, nombre in EXTRAS:
         extra = datos["extras"].get(campo)
         ws.cell(row=fila_extra[campo], column=1, value=nombre)
         ws.cell(row=fila_extra[campo], column=2, value=extra["centavos"] / 100 if extra else None)
     ws.cell(row=fila_extra["saldo"], column=2, value=f"=B{fila_extra['deposito']}-B{fila_extra['retiro']}")
-    ws.cell(row=r + 3, column=1, value="Total + bajada")
-    ws.cell(row=r + 3, column=2, value=f"=B{r + 2}+B{fila_extra['bajada']}")
     for fila in ws.iter_rows(min_row=4, min_col=2, max_col=col_total):
         for c in fila:
             c.number_format = FORMATO_MONEDA
 
     hs = wb.create_sheet("Historial")
-    hs.append(["Fecha", "Turno", "Turno actual", "Total al cierre"])
-    estilo_encabezado(hs, 1, 4)
-    for i, ancho in enumerate((12, 10, 16, 16), start=1):
-        hs.column_dimensions[get_column_letter(i)].width = ancho
+    campos = ("anterior", "actual", "bajada", "resultado", "saldo", "final")
+    hs.append(["Fecha", "Turno", "Turno anterior", "Turno actual", "Bajada", "Resultado", "Saldo", "Final"])
+    estilo_encabezado(hs, 1, 8)
+    for i in range(1, 9):
+        hs.column_dimensions[get_column_letter(i)].width = 12 if i <= 2 else 16
     for h in reversed(historial(db)):
-        hs.append([h["caja"][0], TURNOS[h["caja"][1]][1], h["actual"] / 100, h["cierre"] / 100])
+        hs.append([h["caja"][0], TURNOS[h["caja"][1]][1]] + [h[c] / 100 for c in campos])
         hs.cell(row=hs.max_row, column=1).number_format = "dd/mm/yyyy"
-        for col in (3, 4):
+        for col in range(3, 9):
             hs.cell(row=hs.max_row, column=col).number_format = FORMATO_MONEDA
 
     buffer = io.BytesIO()

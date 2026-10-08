@@ -16,7 +16,7 @@
 </section>
 
 <h1>Caja {{ nombre_caja(caja) }}</h1>
-<p class="sub">El <b>turno anterior</b> es el total con el que cerró la caja {{ nombre_caja(caja_previa) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
+<p class="sub">El <b>turno anterior</b> es el turno actual de la caja {{ nombre_caja(caja_previa) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
 
 {% if not filas or not columnas %}
   <section class="card vacio">
@@ -28,16 +28,19 @@
   </section>
 {% else %}
   <section class="resumen">
-    <div class="kpi"><div class="k">Turno anterior</div><div class="v {{ 'neg' if totales.anterior < 0 }}">{{ totales.anterior|dinero }}</div></div>
+    <div class="kpi"><div class="k">Turno anterior</div><div class="v">{{ totales.anterior|dinero }}</div></div>
+    <span class="op">− (</span>
+    <div class="kpi"><div class="k">Turno actual</div><div class="v">{{ totales.actual|dinero }}</div></div>
     <span class="op">+</span>
-    <div class="kpi"><div class="k">Turno actual</div><div class="v {{ 'neg' if totales.actual < 0 }}">{{ totales.actual|dinero }}</div></div>
+    <div class="kpi"><div class="k">Bajada</div><div class="v">{{ totales.bajada|dinero }}</div></div>
+    <span class="op">) =</span>
+    <div class="kpi"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
+
+    <div class="kpi fila2"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
+    <span class="op">−</span>
+    <div class="kpi"><div class="k">Saldo</div><div class="v">{{ totales.saldo|dinero }}</div></div>
     <span class="op">=</span>
-    <div class="kpi destacado"><div class="k">Total caja</div><div class="v {{ 'pos' if totales.caja >= 0 else 'neg' }}">{{ totales.caja|dinero }}</div></div>
-    <div class="kpi con-bajada">
-      <div class="k">Total + bajada</div>
-      <div class="v {{ 'neg' if totales.con_bajada < 0 }}">{{ totales.con_bajada|dinero }}</div>
-      <div class="detalle">{{ totales.caja|dinero }} + bajada {{ (extras.bajada.centavos if extras.bajada else 0)|dinero }}</div>
-    </div>
+    <div class="kpi destacado"><div class="k">Final</div><div class="v {{ 'pos' if totales.final >= 0 else 'neg' }}">{{ totales.final|dinero }}</div></div>
   </section>
   {% if total_grilla != totales.actual %}
     <p class="nota">Los totales de arriba son de toda la caja; abajo ves solo las filas y columnas que tenés asignadas.</p>
@@ -90,13 +93,13 @@
 
     <section class="card">
       <h2>Otros datos del turno</h2>
-      <p class="nota" style="margin:0 0 12px">No entran en las sumas de la caja. El saldo se calcula solo: depósito − retiro.</p>
+      <p class="nota" style="margin:0 0 12px">No suman en el turno actual. La bajada y el saldo (depósito − retiro) se usan en la cuenta de arriba.</p>
       <div class="extras">
         {% for campo, nombre in campos_extras %}
           {% set extra = extras.get(campo) %}
           {% if campo == 'saldo' %}
           <div class="campo">{{ nombre }}
-            <output title="Depósito − retiro" class="calculado {{ 'neg' if saldo < 0 }}">{{ saldo|dinero }}</output>
+            <output title="Depósito − retiro" class="calculado {{ 'neg' if totales.saldo < 0 }}">{{ totales.saldo|dinero }}</output>
           </div>
           {% else %}
           <label>{{ nombre }}
@@ -116,13 +119,15 @@
 <section class="card">
   <h2>Últimas cajas</h2>
   <div class="tabla"><table>
-    <thead><tr><th>Caja</th><th class="n">Turno actual</th><th class="n">Total al cierre</th></tr></thead>
+    <thead><tr><th>Caja</th><th class="n">Turno anterior</th><th class="n">Turno actual</th><th class="n">Resultado</th><th class="n">Final</th></tr></thead>
     <tbody>
     {% for h in historial %}
       <tr class="{{ 'actual' if h.caja == caja }}">
         <td><a href="{{ url_caja(h.caja) }}">{{ nombre_caja(h.caja) }}</a></td>
-        <td class="n {{ 'neg' if h.actual < 0 }}">{{ h.actual|dinero }}</td>
-        <td class="n">{{ h.cierre|dinero }}</td>
+        <td class="n">{{ h.anterior|dinero }}</td>
+        <td class="n">{{ h.actual|dinero }}</td>
+        <td class="n {{ 'neg' if h.resultado < 0 }}">{{ h.resultado|dinero }}</td>
+        <td class="n {{ 'neg' if h.final < 0 }}">{{ h.final|dinero }}</td>
       </tr>
     {% endfor %}
     </tbody>

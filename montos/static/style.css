@@ -87,7 +87,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
 .turnos a:last-child { border-right: 0; }
 .turnos a.activo { background: var(--accent); color: #fff; font-weight: 600; }
 .kpi.destacado { border-color: var(--accent); }
-.resumen { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 12px; align-items: center; margin-bottom: 18px; }
+.resumen { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr; gap: 12px; align-items: center; margin-bottom: 18px; }
 .resumen .op { font-size: 1.4rem; font-weight: 700; color: var(--muted); }
 .nota { color: var(--muted); font-size: .88rem; margin: -8px 0 14px; }
 tr.actual td { background: var(--soft); font-weight: 600; }
@@ -99,7 +99,8 @@ details.quitadas { margin: -4px 0 14px; }
 details.quitadas .lista { margin: 6px 0 0; }
 .extras { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
 .extras input { text-align: right; font-variant-numeric: tabular-nums; font-size: 1.05rem; }
-.resumen .con-bajada { grid-column: 5; }
+.resumen .fila2 { grid-column: 3; }
+.resumen .op { text-align: center; white-space: nowrap; }
 .kpi .detalle { font-size: .78rem; color: var(--muted); margin-top: 2px; }
 .extras output.calculado { display: block; padding: 8px 10px; border-radius: 7px; border: 1px dashed var(--border); text-align: right; font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 600; color: var(--text); }
 .extras output.calculado.neg { color: var(--bad); }

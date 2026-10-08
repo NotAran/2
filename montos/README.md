@@ -12,18 +12,18 @@ todo se puede descargar en Excel.
 - Cada caja es una planilla de **cuentas** (filas: Mercado, Naranja, Ualá,
   Personal, Brubank, Lemon, Prex, Arq, Binance) por **personas** (columnas:
   Paco, Antonio, Ibra; son solo columnas, no usuarios) y se divide en:
-  - **Turno anterior**: un solo número, el total con el que cerró la caja
-    anterior (todas las cuentas y columnas, acumulado). Se calcula solo.
-  - **Turno actual**: los montos que se cargan en cada columna, con el total
-    por cuenta y por columna.
-  - **Total caja** = turno anterior + turno actual. Pasa a ser el turno anterior
-    de la caja siguiente.
-- **Otros datos del turno**: Depósito, Retiro, Bono, Saldo y Bajada, un monto de cada uno por caja.
-  No entran en las sumas de la caja. El saldo se calcula solo: depósito − retiro.
-- **Total + bajada**: se muestra debajo del total de la caja (total caja + bajada).
-  Es solo informativo: la caja siguiente arranca con el total caja.
-- Si se corrige una caja vieja, los saldos de las cajas siguientes se actualizan solos.
-- **Últimas cajas**: lista con el movimiento de cada turno y el saldo al cierre.
+  - **Turno actual**: la suma de todas las columnas (cada columna es la suma
+    de sus filas).
+  - **Turno anterior**: el turno actual de la caja inmediatamente anterior
+    (0 si esa caja no tuvo montos). Se calcula solo.
+- **Cuenta de la caja** (arriba de todo):
+  - Resultado = turno anterior − (turno actual + bajada)
+  - Final = resultado − saldo
+- **Otros datos del turno**: Depósito, Retiro, Bono, Saldo y Bajada, un monto de
+  cada uno por caja. No suman en el turno actual. El saldo se calcula solo:
+  depósito − retiro.
+- Si se corrige una caja, el turno anterior de la siguiente se actualiza solo.
+- **Últimas cajas**: lista con turno anterior, turno actual, resultado y final de cada caja.
 - **Excel**: descarga la caja elegida (con los totales como fórmulas) y el historial.
 
 ## Usuarios y admin
