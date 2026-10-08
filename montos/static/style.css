@@ -77,3 +77,25 @@ details summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
 
 .auth { max-width: 380px; margin: 8vh auto; }
 .auth form { display: flex; flex-direction: column; gap: 12px; }
+
+/* Cajas */
+.selector { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px; }
+.selector .flecha { font-weight: 600; text-decoration: none; white-space: nowrap; }
+.selector .elegir { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.turnos { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.turnos a { padding: 8px 14px; text-decoration: none; color: var(--text); border-right: 1px solid var(--border); }
+.turnos a:last-child { border-right: 0; }
+.turnos a.activo { background: var(--accent); color: #fff; font-weight: 600; }
+.kpi.destacado { border-color: var(--accent); }
+table.grilla th.centro { text-align: center; }
+table.grilla tr.grupos th { border-bottom: 0; padding-bottom: 2px; }
+table.grilla th.actual-grupo { color: var(--accent); border-bottom: 2px solid var(--accent); }
+table.grilla td.anterior, table.grilla th.anterior { background: var(--soft); color: var(--muted); }
+table.grilla td.subtotal, table.grilla th.subtotal { font-weight: 600; }
+tr.actual td { background: var(--soft); font-weight: 600; }
+@media (max-width: 560px) {
+  .selector { justify-content: center; }
+  .selector .flecha { order: 2; }
+}
+details.quitadas { margin: -4px 0 14px; }
+details.quitadas .lista { margin: 6px 0 0; }

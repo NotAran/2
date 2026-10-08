@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block titulo %}Planilla de montos{% endblock %}</title>
+  <title>{% block titulo %}Cajas por turno{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 {% if usuario %}
 <nav class="top"><div class="in">
-  <span class="marca">Planilla de montos</span>
-  <a href="{{ url_for('planilla') }}" class="{{ 'activo' if request.endpoint == 'planilla' }}">Planilla</a>
+  <span class="marca">Cajas por turno</span>
+  <a href="{{ url_for('planilla') }}" class="{{ 'activo' if request.endpoint == 'planilla' }}">Cajas</a>
   {% if usuario.es_admin %}<a href="{{ url_for('admin') }}" class="{{ 'activo' if request.endpoint == 'admin' }}">Admin</a>{% endif %}
   <span class="quien">{{ usuario.nombre }}{% if usuario.es_admin %} (admin){% endif %}</span>
   <form method="post" action="{{ url_for('salir') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Salir</button></form>

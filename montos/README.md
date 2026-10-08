@@ -1,23 +1,34 @@
-# Planilla de montos
+# Cajas por turno
 
-Página web con usuarios donde se cargan montos de dinero en una planilla de
-filas (cuentas) y columnas. Los datos se guardan en una base de datos SQLite
-interna (`montos.db`), la página calcula los totales y todo se puede descargar
-en Excel.
+Página web con usuarios para llevar las cajas de cada turno. Los datos se guardan
+en una base de datos SQLite interna (`montos.db`), la página hace los cálculos y
+todo se puede descargar en Excel.
 
-## Qué hace
+## Cómo funciona
 
-- **Admin**: la primera vez que se abre la página pide crear la cuenta del admin.
-- **Usuarios**: el admin crea usuarios (todos los que quiera), les cambia la
-  contraseña o los elimina.
-- **Planilla**: filas iniciales Mercado, Naranja, Ualá, Personal, Brubank, Lemon,
-  Prex, Arq y Binance; columnas iniciales Ingresos (suma) y Gastos (resta).
-  El admin puede agregar o quitar filas y columnas. Cada columna puede sumar o
-  restar en el total.
-- **Permisos**: el admin elige qué filas y qué columnas ve y carga cada usuario.
-  El admin ve y carga todo.
-- **Cálculos**: total por fila, total por columna y total general.
-- **Excel**: descarga la planilla visible con los totales como fórmulas.
+- **3 cajas por día**, en este orden: Noche → Mañana → Tarde (y después la Noche
+  del día siguiente). Se elige la caja con la fecha y los botones de turno, o con
+  "Caja anterior / Caja siguiente".
+- Cada caja es una planilla de **cuentas** (filas: Mercado, Naranja, Ualá,
+  Personal, Brubank, Lemon, Prex, Arq, Binance) por **personas** (columnas:
+  Paco, Antonio, Ibra) y se divide en:
+  - **Turno anterior**: el saldo con el que cerró la caja anterior. Se calcula solo.
+  - **Turno actual**: los montos que carga cada persona en su columna.
+  - **Total caja** = turno anterior + turno actual. Pasa a ser el turno anterior
+    de la caja siguiente.
+- Si se corrige una caja vieja, los saldos de las cajas siguientes se actualizan solos.
+- **Últimas cajas**: lista con el movimiento de cada turno y el saldo al cierre.
+- **Excel**: descarga la caja elegida (con los totales como fórmulas) y el historial.
+
+## Usuarios y admin
+
+- La primera vez que se abre la página pide crear la cuenta del **admin**.
+- El admin crea usuarios (todos los que quiera), les cambia la contraseña o los elimina.
+- El admin agrega o quita filas y columnas. Cada columna puede sumar o restar.
+  Si se quita una fila o columna que ya tiene montos, se oculta pero sus montos
+  siguen contando en los saldos (se puede reactivar).
+- El admin elige qué filas y columnas ve y carga cada usuario. Cada usuario ve
+  los cálculos de lo que tiene asignado; el admin ve todo.
 - Cada celda guarda quién la modificó por última vez y cuándo (se ve al pasar
   el mouse por encima).
 

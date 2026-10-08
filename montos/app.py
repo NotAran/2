@@ -1,16 +1,22 @@
-"""Planilla de montos con usuarios.
+"""Cajas por turno.
 
-El admin define las filas (cuentas) y las columnas (conceptos) de la planilla,
-crea usuarios y les asigna qué filas y columnas pueden ver y cargar. Los montos
-se guardan en una base de datos SQLite interna, la página calcula los totales y
-todo se puede descargar en Excel.
+Cada día tiene 3 cajas (turnos noche, mañana y tarde). Cada caja es una planilla
+de cuentas (filas) por personas (columnas) y se divide en:
+
+- Turno anterior: el saldo con el que cerró la caja anterior (se calcula solo).
+- Turno actual: los montos que se cargan en las columnas durante el turno.
+
+Total caja = turno anterior + turno actual, y pasa a ser el turno anterior de
+la caja siguiente. El admin define filas y columnas, crea usuarios y les asigna
+qué filas y columnas ven y cargan. Los datos se guardan en una base SQLite
+interna y se pueden descargar en Excel.
 """
 
 import io
 import os
 import secrets
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, send_file, session, url_for
@@ -20,9 +26,12 @@ from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION_ESQUEMA = 2
+VERSION_ESQUEMA = 3
 FILAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon", "Prex", "Arq", "Binance")
-COLUMNAS_INICIALES = (("Ingresos", 1), ("Gastos", -1))  # signo: suma o resta en el total
+COLUMNAS_INICIALES = (("Paco", 1), ("Antonio", 1), ("Ibra", 1))  # signo: suma o resta en el total
+TURNOS = (("noche", "Noche"), ("manana", "Mañana"), ("tarde", "Tarde"))  # orden de las cajas en el día
+TURNO_POR_SLUG = {slug: i for i, (slug, _) in enumerate(TURNOS)}
+DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 FORMATO_MONEDA = '"$"#,##0.00;[Red]-"$"#,##0.00'
 
 
@@ -57,21 +66,25 @@ CREATE TABLE IF NOT EXISTS usuarios (
 CREATE TABLE IF NOT EXISTS filas (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-    orden  INTEGER NOT NULL DEFAULT 0
+    orden  INTEGER NOT NULL DEFAULT 0,
+    activo INTEGER NOT NULL DEFAULT 1  -- 0 = quitada pero con historial
 );
 CREATE TABLE IF NOT EXISTS columnas (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT    NOT NULL UNIQUE COLLATE NOCASE,
     signo  INTEGER NOT NULL DEFAULT 1 CHECK (signo IN (1, -1)),
-    orden  INTEGER NOT NULL DEFAULT 0
+    orden  INTEGER NOT NULL DEFAULT 0,
+    activo INTEGER NOT NULL DEFAULT 1  -- 0 = quitada pero con historial
 );
 CREATE TABLE IF NOT EXISTS celdas (
+    fecha           TEXT    NOT NULL,  -- AAAA-MM-DD
+    turno           INTEGER NOT NULL CHECK (turno IN (0, 1, 2)),  -- índice en TURNOS
     fila_id         INTEGER NOT NULL REFERENCES filas(id)    ON DELETE CASCADE,
     columna_id      INTEGER NOT NULL REFERENCES columnas(id) ON DELETE CASCADE,
     centavos        INTEGER NOT NULL,  -- monto en centavos, sin decimales flotantes
     actualizado_por TEXT,
     actualizado     TEXT,
-    PRIMARY KEY (fila_id, columna_id)
+    PRIMARY KEY (fecha, turno, fila_id, columna_id)
 );
 CREATE TABLE IF NOT EXISTS permisos_filas (
     usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -87,16 +100,22 @@ CREATE TABLE IF NOT EXISTS permisos_columnas (
 
 
 def inicializar(db):
-    """Crea las tablas y carga las filas y columnas iniciales (solo la primera vez)."""
+    """Crea o actualiza las tablas y carga las filas y columnas iniciales si no hay."""
+    if db.execute("PRAGMA user_version").fetchone()[0] == 2:
+        db.execute("DROP TABLE IF EXISTS celdas")  # versión anterior: montos sin caja ni turno
     db.executescript(ESQUEMA)
-    db.executemany(
-        "INSERT OR IGNORE INTO filas (nombre, orden) VALUES (?, ?)",
-        [(nombre, i) for i, nombre in enumerate(FILAS_INICIALES)],
-    )
-    db.executemany(
-        "INSERT OR IGNORE INTO columnas (nombre, signo, orden) VALUES (?, ?, ?)",
-        [(nombre, signo, i) for i, (nombre, signo) in enumerate(COLUMNAS_INICIALES)],
-    )
+    for tabla in ("filas", "columnas"):
+        if "activo" not in {r["name"] for r in db.execute(f"PRAGMA table_info({tabla})")}:
+            db.execute(f"ALTER TABLE {tabla} ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
+    if not db.execute("SELECT 1 FROM filas").fetchone():
+        db.executemany(
+            "INSERT INTO filas (nombre, orden) VALUES (?, ?)", [(n, i) for i, n in enumerate(FILAS_INICIALES)]
+        )
+    if not db.execute("SELECT 1 FROM columnas").fetchone():
+        db.executemany(
+            "INSERT INTO columnas (nombre, signo, orden) VALUES (?, ?, ?)",
+            [(n, signo, i) for i, (n, signo) in enumerate(COLUMNAS_INICIALES)],
+        )
     db.execute(f"PRAGMA user_version = {VERSION_ESQUEMA}")
     db.commit()
 
@@ -218,10 +237,50 @@ def contexto():
     return {"csrf": session.get("csrf", ""), "usuario": usuario_actual()}
 
 
-# --- Planilla ------------------------------------------------------------------
+# --- Cajas -------------------------------------------------------------------
+# Una caja se identifica por (fecha, turno), con turno = índice en TURNOS.
 
-def visibles(db, usuario):
-    """Filas y columnas que ve el usuario: todas si es admin, si no las asignadas."""
+def mover(caja, pasos):
+    """Caja que está `pasos` turnos después (o antes, si es negativo)."""
+    fecha, turno = caja
+    n = turno + pasos
+    return fecha + timedelta(days=n // len(TURNOS)), n % len(TURNOS)
+
+
+@app.template_global()
+def nombre_caja(caja):
+    fecha, turno = caja
+    return f"{DIAS[fecha.weekday()].capitalize()} {fecha:%d/%m/%Y} – {TURNOS[turno][1]}"
+
+
+@app.template_global()
+def url_caja(caja, endpoint="planilla"):
+    fecha, turno = caja
+    return url_for(endpoint, fecha=fecha.isoformat(), turno=TURNOS[turno][0])
+
+
+@app.template_global()
+def turno_slug(caja):
+    return TURNOS[caja[1]][0]
+
+
+def ultima_caja():
+    r = get_db().execute("SELECT fecha, turno FROM celdas ORDER BY fecha DESC, turno DESC LIMIT 1").fetchone()
+    return (date.fromisoformat(r["fecha"]), r["turno"]) if r else (date.today(), 0)
+
+
+def caja_pedida(estricto=False):
+    """Caja de los parámetros fecha y turno; si faltan, la última con datos."""
+    try:
+        return date.fromisoformat(request.values.get("fecha", "")), TURNO_POR_SLUG[request.values.get("turno", "")]
+    except (ValueError, KeyError):
+        if estricto:
+            abort(400, "Caja inválida.")
+        return ultima_caja()
+
+
+def permitidas(db, usuario):
+    """Todas las filas y columnas (también las quitadas) que le corresponden al usuario."""
     if usuario["es_admin"]:
         filas = db.execute("SELECT * FROM filas ORDER BY orden, id").fetchall()
         columnas = db.execute("SELECT * FROM columnas ORDER BY orden, id").fetchall()
@@ -239,55 +298,111 @@ def visibles(db, usuario):
     return filas, columnas
 
 
-def armar_planilla(db, usuario):
-    """Datos de la planilla visible y sus totales.
+def armar_caja(db, usuario, caja):
+    """Datos y cálculos de una caja, según lo que puede ver el usuario.
 
-    Total de fila = suma de las columnas con signo + menos las columnas con signo −.
-    Total de columna = suma de la columna.
+    - Turno anterior de una fila: suma (con signo) de todos los montos de las cajas previas.
+    - Turno actual de una fila: suma (con signo) de los montos de esta caja.
+    - Total caja = turno anterior + turno actual.
+    Se muestran las filas y columnas activas, y las quitadas solo si tienen montos en esta caja.
     """
-    filas, columnas = visibles(db, usuario)
-    celdas = {(c["fila_id"], c["columna_id"]): c for c in db.execute("SELECT * FROM celdas")}
+    fecha, turno = caja[0].isoformat(), caja[1]
+    filas_ok, columnas_ok = permitidas(db, usuario)
+    celdas = {
+        (r["fila_id"], r["columna_id"]): r
+        for r in db.execute("SELECT * FROM celdas WHERE fecha = ? AND turno = ?", (fecha, turno))
+    }
+    filas = [f for f in filas_ok if f["activo"] or any(k[0] == f["id"] for k in celdas)]
+    columnas = [c for c in columnas_ok if c["activo"] or any(k[1] == c["id"] for k in celdas)]
+    signo = {c["id"]: c["signo"] for c in columnas_ok}
+
+    anterior = {f["id"]: 0 for f in filas}
+    previas = db.execute(
+        """SELECT fila_id, columna_id, SUM(centavos) AS suma FROM celdas
+           WHERE fecha < ? OR (fecha = ? AND turno < ?) GROUP BY fila_id, columna_id""",
+        (fecha, fecha, turno),
+    )
+    for r in previas:
+        if r["fila_id"] in anterior and r["columna_id"] in signo:
+            anterior[r["fila_id"]] += r["suma"] * signo[r["columna_id"]]
 
     def valor(f, c):
         celda = celdas.get((f["id"], c["id"]))
         return celda["centavos"] if celda else 0
 
-    total_fila = {f["id"]: sum(valor(f, c) * c["signo"] for c in columnas) for f in filas}
-    total_columna = {c["id"]: sum(valor(f, c) for f in filas) for c in columnas}
+    actual = {f["id"]: sum(valor(f, c) * c["signo"] for c in columnas) for f in filas}
+    total_fila = {f["id"]: anterior[f["id"]] + actual[f["id"]] for f in filas}
     return {
+        "caja": caja,
         "filas": filas,
         "columnas": columnas,
         "celdas": celdas,
+        "anterior": anterior,
+        "actual": actual,
         "total_fila": total_fila,
-        "total_columna": total_columna,
-        "total": sum(total_fila.values()),
+        "total_columna": {c["id"]: sum(valor(f, c) for f in filas) for c in columnas},
+        "totales": {
+            "anterior": sum(anterior.values()),
+            "actual": sum(actual.values()),
+            "caja": sum(total_fila.values()),
+        },
     }
+
+
+def historial(db, usuario):
+    """Una entrada por caja con montos: movimiento del turno y saldo al cierre (más nuevas primero)."""
+    filas_ok, columnas_ok = permitidas(db, usuario)
+    ids_filas = {f["id"] for f in filas_ok}
+    signo = {c["id"]: c["signo"] for c in columnas_ok}
+    por_caja = {}
+    for r in db.execute("SELECT fecha, turno, fila_id, columna_id, centavos FROM celdas ORDER BY fecha, turno"):
+        if r["fila_id"] in ids_filas and r["columna_id"] in signo:
+            caja = (date.fromisoformat(r["fecha"]), r["turno"])
+            por_caja[caja] = por_caja.get(caja, 0) + r["centavos"] * signo[r["columna_id"]]
+    saldo, filas = 0, []
+    for caja, movimiento in por_caja.items():
+        saldo += movimiento
+        filas.append({"caja": caja, "actual": movimiento, "cierre": saldo})
+    return filas[::-1]
 
 
 @app.get("/")
 def planilla():
-    return render_template("planilla.html", **armar_planilla(get_db(), usuario_actual()))
+    db = get_db()
+    caja = caja_pedida()
+    return render_template(
+        "planilla.html",
+        **armar_caja(db, usuario_actual(), caja),
+        caja_previa=mover(caja, -1),
+        caja_siguiente=mover(caja, 1),
+        turnos=[((caja[0], i), nombre) for i, (_, nombre) in enumerate(TURNOS)],
+        historial=historial(db, usuario_actual())[:15],
+    )
 
 
 @app.post("/guardar")
 def guardar():
     db = get_db()
     usuario = usuario_actual()
-    filas, columnas = visibles(db, usuario)  # solo se guardan celdas que el usuario puede ver
-    actuales = {(c["fila_id"], c["columna_id"]): c["centavos"] for c in db.execute("SELECT * FROM celdas")}
+    caja = caja_pedida(estricto=True)
+    datos = armar_caja(db, usuario, caja)  # solo se guardan celdas que el usuario puede ver
+    fecha, turno = caja[0].isoformat(), caja[1]
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
     errores, cambios = [], 0
 
-    for f in filas:
-        for c in columnas:
+    for f in datos["filas"]:
+        for c in datos["columnas"]:
             campo = f"c_{f['id']}_{c['id']}"
             if campo not in request.form:
                 continue
             texto = request.form[campo].strip()
-            clave = (f["id"], c["id"])
+            actual = datos["celdas"].get((f["id"], c["id"]))
+            clave = (fecha, turno, f["id"], c["id"])
             if not texto:
-                if clave in actuales:
-                    db.execute("DELETE FROM celdas WHERE fila_id = ? AND columna_id = ?", clave)
+                if actual:
+                    db.execute(
+                        "DELETE FROM celdas WHERE fecha = ? AND turno = ? AND fila_id = ? AND columna_id = ?", clave
+                    )
                     cambios += 1
                 continue
             try:
@@ -295,12 +410,12 @@ def guardar():
             except ValueError as e:
                 errores.append(f"{f['nombre']} / {c['nombre']}: «{texto}» {e}.")
                 continue
-            if actuales.get(clave) == centavos:
+            if actual and actual["centavos"] == centavos:
                 continue
             db.execute(
-                """INSERT INTO celdas (fila_id, columna_id, centavos, actualizado_por, actualizado)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT (fila_id, columna_id) DO UPDATE SET
+                """INSERT INTO celdas (fecha, turno, fila_id, columna_id, centavos, actualizado_por, actualizado)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (fecha, turno, fila_id, columna_id) DO UPDATE SET
                      centavos = excluded.centavos,
                      actualizado_por = excluded.actualizado_por,
                      actualizado = excluded.actualizado""",
@@ -312,47 +427,77 @@ def guardar():
     for error in errores:
         flash(error, "error")
     if cambios:
-        flash(f"Se guardaron {cambios} cambio(s).", "ok")
+        flash(f"Caja {nombre_caja(caja)}: se guardaron {cambios} cambio(s).", "ok")
     elif not errores:
         flash("No había cambios para guardar.", "ok")
-    return redirect(url_for("planilla"))
+    return redirect(url_caja(caja))
+
+
+def estilo_encabezado(ws, fila, cantidad):
+    for i in range(1, cantidad + 1):
+        celda = ws.cell(row=fila, column=i)
+        celda.font, celda.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="2F5597")
 
 
 @app.get("/exportar.xlsx")
 def exportar():
-    """Excel con la planilla visible; los totales son fórmulas de Excel."""
-    datos = armar_planilla(get_db(), usuario_actual())
+    """Excel con la caja elegida (totales como fórmulas) y el historial de cajas."""
+    db = get_db()
+    caja = caja_pedida()
+    datos = armar_caja(db, usuario_actual(), caja)
     filas, columnas, celdas = datos["filas"], datos["columnas"], datos["celdas"]
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Planilla"
-    encabezados = ["Cuenta"] + [f"{c['nombre']} ({'+' if c['signo'] > 0 else '−'})" for c in columnas] + ["Total"]
+    ws.title = "Caja"
+    ws["A1"] = f"Caja: {nombre_caja(caja)}"
+    ws["A1"].font = Font(bold=True, size=13)
+    encabezados = (
+        ["Cuenta", "Turno anterior"]
+        + [f"{c['nombre']}{'' if c['signo'] > 0 else ' (−)'}" for c in columnas]
+        + ["Turno actual", "Total caja"]
+    )
+    ws.append([])
     ws.append(encabezados)
+    estilo_encabezado(ws, 3, len(encabezados))
     for i in range(1, len(encabezados) + 1):
-        celda = ws.cell(row=1, column=i)
-        celda.font, celda.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="2F5597")
         ws.column_dimensions[get_column_letter(i)].width = 16 if i > 1 else 18
-    ws.freeze_panes = "B2"
+    ws.freeze_panes = "B4"
 
-    col_total = len(columnas) + 2
-    letra = {c["id"]: get_column_letter(j) for j, c in enumerate(columnas, start=2)}
-    for i, f in enumerate(filas, start=2):
+    col_actual, col_total = len(columnas) + 3, len(columnas) + 4
+    letra = {c["id"]: get_column_letter(j) for j, c in enumerate(columnas, start=3)}
+    l_actual = get_column_letter(col_actual)
+    for i, f in enumerate(filas, start=4):
         ws.cell(row=i, column=1, value=f["nombre"])
+        ws.cell(row=i, column=2, value=datos["anterior"][f["id"]] / 100)
         for c in columnas:
             celda = celdas.get((f["id"], c["id"]))
             ws[f"{letra[c['id']]}{i}"] = celda["centavos"] / 100 if celda else None
         terminos = "".join(f"{'+' if c['signo'] > 0 else '-'}{letra[c['id']]}{i}" for c in columnas)
-        ws.cell(row=i, column=col_total, value=f"={terminos or 0}")
+        ws.cell(row=i, column=col_actual, value=f"={terminos or 0}")
+        ws.cell(row=i, column=col_total, value=f"=B{i}+{l_actual}{i}")
 
-    fila_total = len(filas) + 2
+    fila_total = len(filas) + 4
     ws.cell(row=fila_total, column=1, value="Total").font = Font(bold=True)
     for j in range(2, col_total + 1):
         l = get_column_letter(j)
-        ws.cell(row=fila_total, column=j, value=f"=SUM({l}2:{l}{fila_total - 1})" if filas else 0).font = Font(bold=True)
-    for fila in ws.iter_rows(min_row=2, min_col=2, max_col=col_total):
+        ws.cell(row=fila_total, column=j, value=f"=SUM({l}4:{l}{fila_total - 1})" if filas else 0).font = Font(
+            bold=True
+        )
+    for fila in ws.iter_rows(min_row=4, min_col=2, max_col=col_total):
         for c in fila:
             c.number_format = FORMATO_MONEDA
+
+    hs = wb.create_sheet("Historial")
+    hs.append(["Fecha", "Turno", "Turno actual", "Total al cierre"])
+    estilo_encabezado(hs, 1, 4)
+    for i, ancho in enumerate((12, 10, 16, 16), start=1):
+        hs.column_dimensions[get_column_letter(i)].width = ancho
+    for h in reversed(historial(db, usuario_actual())):
+        hs.append([h["caja"][0], TURNOS[h["caja"][1]][1], h["actual"] / 100, h["cierre"] / 100])
+        hs.cell(row=hs.max_row, column=1).number_format = "dd/mm/yyyy"
+        for col in (3, 4):
+            hs.cell(row=hs.max_row, column=col).number_format = FORMATO_MONEDA
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -360,7 +505,7 @@ def exportar():
     return send_file(
         buffer,
         as_attachment=True,
-        download_name=f"planilla_{date.today().isoformat()}.xlsx",
+        download_name=f"caja_{caja[0].isoformat()}_{TURNOS[caja[1]][0]}.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -418,12 +563,16 @@ def admin():
     for tabla, campo in (("filas", "fila_id"), ("columnas", "columna_id")):
         for p in db.execute(f"SELECT * FROM permisos_{tabla}"):
             permisos[tabla].setdefault(p["usuario_id"], set()).add(p[campo])
+    listas = {
+        f"{tabla}{sufijo}": db.execute(f"SELECT * FROM {tabla} WHERE activo = ? ORDER BY orden, id", (activo,)).fetchall()
+        for tabla in ("filas", "columnas")
+        for sufijo, activo in (("", 1), ("_quitadas", 0))
+    }
     return render_template(
         "admin.html",
         usuarios=db.execute("SELECT * FROM usuarios ORDER BY es_admin DESC, nombre").fetchall(),
-        filas=db.execute("SELECT * FROM filas ORDER BY orden, id").fetchall(),
-        columnas=db.execute("SELECT * FROM columnas ORDER BY orden, id").fetchall(),
         permisos=permisos,
+        **listas,
     )
 
 
@@ -481,9 +630,13 @@ def admin_permisos(uid):
     if not db.execute("SELECT 1 FROM usuarios WHERE id = ? AND es_admin = 0", (uid,)).fetchone():
         abort(404)
     for tabla, campo in (("filas", "fila_id"), ("columnas", "columna_id")):
-        db.execute(f"DELETE FROM permisos_{tabla} WHERE usuario_id = ?", (uid,))
+        # el formulario solo muestra las activas: las quitadas conservan su permiso (y su historial)
+        db.execute(
+            f"DELETE FROM permisos_{tabla} WHERE usuario_id = ? AND {campo} IN (SELECT id FROM {tabla} WHERE activo = 1)",
+            (uid,),
+        )
         db.executemany(
-            f"INSERT INTO permisos_{tabla} (usuario_id, {campo}) SELECT ?, id FROM {tabla} WHERE id = ?",
+            f"INSERT INTO permisos_{tabla} (usuario_id, {campo}) SELECT ?, id FROM {tabla} WHERE id = ? AND activo = 1",
             [(uid, item_id) for item_id in request.form.getlist(tabla, type=int)],
         )
     db.commit()
@@ -499,26 +652,50 @@ def admin_agregar(tabla):
         return volver_admin(tabla)
     db = get_db()
     orden = db.execute(f"SELECT COALESCE(MAX(orden), -1) + 1 FROM {tabla}").fetchone()[0]
-    try:
-        if tabla == "filas":
-            db.execute("INSERT INTO filas (nombre, orden) VALUES (?, ?)", (nombre, orden))
-        else:
-            signo = -1 if request.form.get("signo") == "-1" else 1
-            db.execute("INSERT INTO columnas (nombre, signo, orden) VALUES (?, ?, ?)", (nombre, signo, orden))
-        db.commit()
+    existente = db.execute(f"SELECT * FROM {tabla} WHERE nombre = ?", (nombre,)).fetchone()
+    if existente and existente["activo"]:
+        flash(f"Ya existe una {tabla[:-1]} llamada «{existente['nombre']}».", "error")
+        return volver_admin(tabla)
+    if existente:
+        db.execute(f"UPDATE {tabla} SET activo = 1, orden = ? WHERE id = ?", (orden, existente["id"]))
+        flash(f"«{existente['nombre']}» se volvió a agregar, con su historial.", "ok")
+    elif tabla == "filas":
+        db.execute("INSERT INTO filas (nombre, orden) VALUES (?, ?)", (nombre, orden))
         flash(f"«{nombre}» agregada. Acordate de asignarla a los usuarios que la tengan que ver.", "ok")
-    except sqlite3.IntegrityError:
-        flash(f"Ya existe una {tabla[:-1]} llamada «{nombre}».", "error")
+    else:
+        signo = -1 if request.form.get("signo") == "-1" else 1
+        db.execute("INSERT INTO columnas (nombre, signo, orden) VALUES (?, ?, ?)", (nombre, signo, orden))
+        flash(f"«{nombre}» agregada. Acordate de asignarla a los usuarios que la tengan que ver.", "ok")
+    db.commit()
     return volver_admin(tabla)
 
 
 @app.post("/admin/<any(filas, columnas):tabla>/<int:item_id>/eliminar")
 def admin_eliminar(tabla, item_id):
+    """Quita una fila o columna. Si ya tiene montos, se oculta para no cambiar los saldos."""
     db = get_db()
-    if db.execute(f"DELETE FROM {tabla} WHERE id = ?", (item_id,)).rowcount == 0:
+    item = db.execute(f"SELECT * FROM {tabla} WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        abort(404)
+    campo = "fila_id" if tabla == "filas" else "columna_id"
+    if db.execute(f"SELECT 1 FROM celdas WHERE {campo} = ? LIMIT 1", (item_id,)).fetchone():
+        db.execute(f"UPDATE {tabla} SET activo = 0 WHERE id = ?", (item_id,))
+        flash(f"«{item['nombre']}» se quitó. Sus montos de cajas anteriores se conservan para no cambiar los saldos.", "ok")
+    else:
+        db.execute(f"DELETE FROM {tabla} WHERE id = ?", (item_id,))
+        flash(f"«{item['nombre']}» se eliminó.", "ok")
+    db.commit()
+    return volver_admin(tabla)
+
+
+@app.post("/admin/<any(filas, columnas):tabla>/<int:item_id>/reactivar")
+def admin_reactivar(tabla, item_id):
+    db = get_db()
+    orden = db.execute(f"SELECT COALESCE(MAX(orden), -1) + 1 FROM {tabla}").fetchone()[0]
+    if db.execute(f"UPDATE {tabla} SET activo = 1, orden = ? WHERE id = ?", (orden, item_id)).rowcount == 0:
         abort(404)
     db.commit()
-    flash("Eliminada, junto con sus montos.", "ok")
+    flash("Se volvió a agregar, con su historial.", "ok")
     return volver_admin(tabla)
 
 

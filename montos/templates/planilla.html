@@ -1,7 +1,22 @@
 {% extends "base.html" %}
+{% block titulo %}Caja {{ nombre_caja(caja) }}{% endblock %}
 {% block contenido %}
-<h1>Planilla</h1>
-<p class="sub">Escribí los montos en las celdas y apretá <b>Guardar</b>. Para borrar un monto, dejá la celda vacía.</p>
+<section class="card selector">
+  <a class="flecha" href="{{ url_caja(caja_previa) }}" title="{{ nombre_caja(caja_previa) }}">← Caja anterior</a>
+  <form method="get" action="{{ url_for('planilla') }}" class="elegir">
+    <input type="date" name="fecha" value="{{ caja[0].isoformat() }}" onchange="this.form.submit()" aria-label="Fecha">
+    <div class="turnos">
+      {% for c, nombre in turnos %}
+        <a href="{{ url_caja(c) }}" class="{{ 'activo' if c == caja }}">{{ nombre }}</a>
+      {% endfor %}
+    </div>
+    <input type="hidden" name="turno" value="{{ turno_slug(caja) }}">
+  </form>
+  <a class="flecha" href="{{ url_caja(caja_siguiente) }}" title="{{ nombre_caja(caja_siguiente) }}">Caja siguiente →</a>
+</section>
+
+<h1>Caja {{ nombre_caja(caja) }}</h1>
+<p class="sub">El <b>turno anterior</b> es el saldo con el que cerró la caja {{ nombre_caja(caja_previa) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
 
 {% if not filas or not columnas %}
   <section class="card vacio">
@@ -13,34 +28,43 @@
   </section>
 {% else %}
   <section class="kpis">
-    {% for c in columnas %}
-      <div class="kpi"><div class="k">{{ c.nombre }}</div><div class="v">{{ total_columna[c.id]|dinero }}</div></div>
-    {% endfor %}
-    <div class="kpi"><div class="k">Total</div><div class="v {{ 'pos' if total >= 0 else 'neg' }}">{{ total|dinero }}</div></div>
+    <div class="kpi"><div class="k">Turno anterior</div><div class="v">{{ totales.anterior|dinero }}</div></div>
+    <div class="kpi"><div class="k">Turno actual</div><div class="v {{ 'neg' if totales.actual < 0 }}">{{ totales.actual|dinero }}</div></div>
+    <div class="kpi destacado"><div class="k">Total caja</div><div class="v {{ 'pos' if totales.caja >= 0 else 'neg' }}">{{ totales.caja|dinero }}</div></div>
   </section>
 
   <form method="post" action="{{ url_for('guardar') }}" class="card">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="fecha" value="{{ caja[0].isoformat() }}">
+    <input type="hidden" name="turno" value="{{ turno_slug(caja) }}">
     <div class="toolbar">
-      <h2 style="margin:0">{{ filas|length }} cuentas × {{ columnas|length }} columnas</h2>
+      <h2 style="margin:0">{{ filas|length }} cuentas</h2>
       <div style="display:flex;gap:8px">
-        <a class="btn verde" href="{{ url_for('exportar') }}">Descargar Excel</a>
+        <a class="btn verde" href="{{ url_caja(caja, 'exportar') }}">Descargar Excel</a>
         <button>Guardar</button>
       </div>
     </div>
     <div class="tabla">
       <table class="grilla">
-        <thead><tr>
-          <th>Cuenta</th>
-          {% for c in columnas %}
-            <th class="n">{{ c.nombre }}<span class="signo {{ 'mas' if c.signo > 0 else 'menos' }}" title="{{ 'Suma' if c.signo > 0 else 'Resta' }} en el total">{{ '+' if c.signo > 0 else '−' }}</span></th>
-          {% endfor %}
-          <th class="n total">Total</th>
-        </tr></thead>
+        <thead>
+          <tr class="grupos">
+            <th rowspan="2">Cuenta</th>
+            <th rowspan="2" class="n anterior">Turno<br>anterior</th>
+            <th colspan="{{ columnas|length + 1 }}" class="centro actual-grupo">Turno actual</th>
+            <th rowspan="2" class="n total">Total<br>caja</th>
+          </tr>
+          <tr>
+            {% for c in columnas %}
+              <th class="n">{{ c.nombre }}{% if c.signo < 0 %}<span class="signo menos" title="Resta en el total">−</span>{% endif %}</th>
+            {% endfor %}
+            <th class="n subtotal">Subtotal</th>
+          </tr>
+        </thead>
         <tbody>
         {% for f in filas %}
           <tr>
             <td>{{ f.nombre }}</td>
+            <td class="n anterior {{ 'neg' if anterior[f.id] < 0 }}">{{ anterior[f.id]|dinero }}</td>
             {% for c in columnas %}
               {% set celda = celdas.get((f.id, c.id)) %}
               <td><input name="c_{{ f.id }}_{{ c.id }}" inputmode="decimal" autocomplete="off" placeholder="0,00"
@@ -48,18 +72,39 @@
                          value="{{ celda.centavos|numero if celda else '' }}"
                          {% if celda %}title="Último cambio: {{ celda.actualizado_por }} – {{ celda.actualizado }}"{% endif %}></td>
             {% endfor %}
+            <td class="n subtotal {{ 'neg' if actual[f.id] < 0 }}">{{ actual[f.id]|dinero }}</td>
             <td class="n total {{ 'neg' if total_fila[f.id] < 0 }}">{{ total_fila[f.id]|dinero }}</td>
           </tr>
         {% endfor %}
         </tbody>
         <tfoot><tr>
           <td>Total</td>
+          <td class="n anterior">{{ totales.anterior|dinero }}</td>
           {% for c in columnas %}<td class="n">{{ total_columna[c.id]|dinero }}</td>{% endfor %}
-          <td class="n total {{ 'neg' if total < 0 }}">{{ total|dinero }}</td>
+          <td class="n subtotal">{{ totales.actual|dinero }}</td>
+          <td class="n total {{ 'neg' if totales.caja < 0 }}">{{ totales.caja|dinero }}</td>
         </tr></tfoot>
       </table>
     </div>
     <div style="text-align:right;margin-top:12px"><button>Guardar</button></div>
   </form>
+{% endif %}
+
+{% if historial %}
+<section class="card">
+  <h2>Últimas cajas</h2>
+  <div class="tabla"><table>
+    <thead><tr><th>Caja</th><th class="n">Turno actual</th><th class="n">Total al cierre</th></tr></thead>
+    <tbody>
+    {% for h in historial %}
+      <tr class="{{ 'actual' if h.caja == caja }}">
+        <td><a href="{{ url_caja(h.caja) }}">{{ nombre_caja(h.caja) }}</a></td>
+        <td class="n {{ 'neg' if h.actual < 0 }}">{{ h.actual|dinero }}</td>
+        <td class="n">{{ h.cierre|dinero }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
 {% endif %}
 {% endblock %}

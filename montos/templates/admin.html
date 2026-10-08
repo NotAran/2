@@ -2,7 +2,7 @@
 {% block titulo %}Admin{% endblock %}
 {% block contenido %}
 <h1>Panel de admin</h1>
-<p class="sub">Creá usuarios, armá la planilla y elegí qué filas y columnas ve y carga cada usuario.</p>
+<p class="sub">Creá usuarios, armá la planilla de las cajas y elegí qué filas y columnas ve y carga cada usuario. Si quitás una fila o columna que ya tiene montos, se oculta pero sus montos siguen contando en los saldos.</p>
 
 <div class="admin-grid">
   <section class="card" id="usuarios">
@@ -43,7 +43,7 @@
       {% for f in filas %}
         <li>
           <span class="nombre">{{ f.nombre }}</span>
-          <form method="post" action="{{ url_for('admin_eliminar', tabla='filas', item_id=f.id) }}" data-confirm="¿Quitar la fila {{ f.nombre }}? Se borran también sus montos.">
+          <form method="post" action="{{ url_for('admin_eliminar', tabla='filas', item_id=f.id) }}" data-confirm="¿Quitar la fila {{ f.nombre }}?">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <button class="peligro">Quitar</button>
           </form>
@@ -52,6 +52,22 @@
         <li class="vacio">No hay filas.</li>
       {% endfor %}
     </ul>
+    {% if filas_quitadas %}
+      <details class="quitadas">
+        <summary>Quitadas con historial ({{ filas_quitadas|length }})</summary>
+        <ul class="lista">
+          {% for q in filas_quitadas %}
+            <li>
+              <span class="nombre">{{ q.nombre }}</span>
+              <form method="post" action="{{ url_for('admin_reactivar', tabla='filas', item_id=q.id) }}">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button class="sec">Reactivar</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
     <form class="alta" method="post" action="{{ url_for('admin_agregar', tabla='filas') }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input name="nombre" placeholder="Nueva fila" required maxlength="40" autocomplete="off">
@@ -60,13 +76,13 @@
   </section>
 
   <section class="card" id="columnas">
-    <h2>Columnas</h2>
+    <h2>Columnas (personas)</h2>
     <ul class="lista">
       {% for c in columnas %}
         <li>
           <span class="nombre">{{ c.nombre }}</span>
           <span class="signo {{ 'mas' if c.signo > 0 else 'menos' }}">{{ 'suma' if c.signo > 0 else 'resta' }}</span>
-          <form method="post" action="{{ url_for('admin_eliminar', tabla='columnas', item_id=c.id) }}" data-confirm="¿Quitar la columna {{ c.nombre }}? Se borran también sus montos.">
+          <form method="post" action="{{ url_for('admin_eliminar', tabla='columnas', item_id=c.id) }}" data-confirm="¿Quitar la columna {{ c.nombre }}?">
             <input type="hidden" name="csrf" value="{{ csrf }}">
             <button class="peligro">Quitar</button>
           </form>
@@ -75,6 +91,22 @@
         <li class="vacio">No hay columnas.</li>
       {% endfor %}
     </ul>
+    {% if columnas_quitadas %}
+      <details class="quitadas">
+        <summary>Quitadas con historial ({{ columnas_quitadas|length }})</summary>
+        <ul class="lista">
+          {% for q in columnas_quitadas %}
+            <li>
+              <span class="nombre">{{ q.nombre }}</span>
+              <form method="post" action="{{ url_for('admin_reactivar', tabla='columnas', item_id=q.id) }}">
+                <input type="hidden" name="csrf" value="{{ csrf }}">
+                <button class="sec">Reactivar</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
     <form class="alta" method="post" action="{{ url_for('admin_agregar', tabla='columnas') }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input name="nombre" placeholder="Nueva columna" required maxlength="40" autocomplete="off">
