@@ -29,7 +29,7 @@ from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION_ESQUEMA = 8
+VERSION_ESQUEMA = 9  # la 9 agregó colores a las billeteras; se quitaron, pero las bases que ya la tienen quedan igual
 LARGO_OBSERVACIONES = 2000
 CAJAS_INICIALES = ("Caja 1", "Caja 2")
 BILLETERAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon", "Prex", "Arq", "Binance")
