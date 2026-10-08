@@ -26,11 +26,12 @@ from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION_ESQUEMA = 3
+VERSION_ESQUEMA = 4
 FILAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon", "Prex", "Arq", "Binance")
 COLUMNAS_INICIALES = (("Paco", 1), ("Antonio", 1), ("Ibra", 1))  # signo: suma o resta en el total
 TURNOS = (("noche", "Noche"), ("manana", "Mañana"), ("tarde", "Tarde"))  # orden de las cajas en el día
 TURNO_POR_SLUG = {slug: i for i, (slug, _) in enumerate(TURNOS)}
+EXTRAS = (("bajada", "Bajada"), ("bono", "Bono"), ("saldo", "Saldo"))  # datos de cada caja que no suman
 DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 FORMATO_MONEDA = '"$"#,##0.00;[Red]-"$"#,##0.00'
 
@@ -85,6 +86,15 @@ CREATE TABLE IF NOT EXISTS celdas (
     actualizado_por TEXT,
     actualizado     TEXT,
     PRIMARY KEY (fecha, turno, fila_id, columna_id)
+);
+CREATE TABLE IF NOT EXISTS extras (
+    fecha           TEXT    NOT NULL,
+    turno           INTEGER NOT NULL CHECK (turno IN (0, 1, 2)),
+    campo           TEXT    NOT NULL,  -- clave en EXTRAS
+    centavos        INTEGER NOT NULL,
+    actualizado_por TEXT,
+    actualizado     TEXT,
+    PRIMARY KEY (fecha, turno, campo)
 );
 CREATE TABLE IF NOT EXISTS permisos_filas (
     usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -307,7 +317,8 @@ def armar_caja(db, usuario, caja):
     - Turno actual: suma (con signo) de los montos de esta caja.
     - Total caja = turno anterior + turno actual.
     La grilla muestra las filas y columnas asignadas al usuario: las activas, y las
-    quitadas solo si tienen montos en esta caja.
+    quitadas solo si tienen montos en esta caja. Los extras (bajada, bono, saldo)
+    no entran en ninguna suma.
     """
     fecha, turno = caja[0].isoformat(), caja[1]
     filas_ok, columnas_ok = permitidas(db, usuario)
@@ -340,6 +351,9 @@ def armar_caja(db, usuario, caja):
         "total_columna": {c["id"]: sum(valor(f, c) for f in filas) for c in columnas},
         "total_grilla": sum(total_fila.values()),
         "totales": {"anterior": anterior, "actual": actual, "caja": anterior + actual},
+        "extras": {
+            r["campo"]: r for r in db.execute("SELECT * FROM extras WHERE fecha = ? AND turno = ?", (fecha, turno))
+        },
     }
 
 
@@ -367,7 +381,21 @@ def planilla():
         caja_siguiente=mover(caja, 1),
         turnos=[((caja[0], i), nombre) for i, (_, nombre) in enumerate(TURNOS)],
         historial=historial(db)[:15],
+        campos_extras=EXTRAS,
     )
+
+
+def leer_cambio(texto, actual, etiqueta, errores):
+    """Interpreta lo escrito en un campo. Devuelve (hay_cambio, centavos); centavos None = borrar."""
+    texto = texto.strip()
+    if not texto:
+        return actual is not None, None
+    try:
+        centavos = parsear_monto(texto)
+    except ValueError as e:
+        errores.append(f"{etiqueta}: «{texto}» {e}.")
+        return False, None
+    return not (actual and actual["centavos"] == centavos), centavos
 
 
 @app.post("/guardar")
@@ -385,33 +413,45 @@ def guardar():
             campo = f"c_{f['id']}_{c['id']}"
             if campo not in request.form:
                 continue
-            texto = request.form[campo].strip()
-            actual = datos["celdas"].get((f["id"], c["id"]))
             clave = (fecha, turno, f["id"], c["id"])
-            if not texto:
-                if actual:
-                    db.execute(
-                        "DELETE FROM celdas WHERE fecha = ? AND turno = ? AND fila_id = ? AND columna_id = ?", clave
-                    )
-                    cambios += 1
+            hay_cambio, centavos = leer_cambio(
+                request.form[campo], datos["celdas"].get((f["id"], c["id"])), f"{f['nombre']} / {c['nombre']}", errores
+            )
+            if not hay_cambio:
                 continue
-            try:
-                centavos = parsear_monto(texto)
-            except ValueError as e:
-                errores.append(f"{f['nombre']} / {c['nombre']}: «{texto}» {e}.")
-                continue
-            if actual and actual["centavos"] == centavos:
-                continue
+            if centavos is None:
+                db.execute("DELETE FROM celdas WHERE fecha = ? AND turno = ? AND fila_id = ? AND columna_id = ?", clave)
+            else:
+                db.execute(
+                    """INSERT INTO celdas (fecha, turno, fila_id, columna_id, centavos, actualizado_por, actualizado)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT (fecha, turno, fila_id, columna_id) DO UPDATE SET
+                         centavos = excluded.centavos,
+                         actualizado_por = excluded.actualizado_por,
+                         actualizado = excluded.actualizado""",
+                    (*clave, centavos, usuario["nombre"], ahora),
+                )
+            cambios += 1
+
+    for campo, nombre in EXTRAS:
+        if f"x_{campo}" not in request.form:
+            continue
+        hay_cambio, centavos = leer_cambio(request.form[f"x_{campo}"], datos["extras"].get(campo), nombre, errores)
+        if not hay_cambio:
+            continue
+        if centavos is None:
+            db.execute("DELETE FROM extras WHERE fecha = ? AND turno = ? AND campo = ?", (fecha, turno, campo))
+        else:
             db.execute(
-                """INSERT INTO celdas (fecha, turno, fila_id, columna_id, centavos, actualizado_por, actualizado)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT (fecha, turno, fila_id, columna_id) DO UPDATE SET
+                """INSERT INTO extras (fecha, turno, campo, centavos, actualizado_por, actualizado)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (fecha, turno, campo) DO UPDATE SET
                      centavos = excluded.centavos,
                      actualizado_por = excluded.actualizado_por,
                      actualizado = excluded.actualizado""",
-                (*clave, centavos, usuario["nombre"], ahora),
+                (fecha, turno, campo, centavos, usuario["nombre"], ahora),
             )
-            cambios += 1
+        cambios += 1
 
     db.commit()
     for error in errores:
@@ -478,6 +518,11 @@ def exportar():
     ws.cell(row=r + 1, column=2, value=f"={l_total}{fila_total}" if completa else totales["actual"] / 100)
     ws.cell(row=r + 2, column=1, value="Total caja").font = Font(bold=True)
     ws.cell(row=r + 2, column=2, value=f"=B{r}+B{r + 1}").font = Font(bold=True)
+    ws.cell(row=r + 4, column=1, value="Otros datos (no suman)").font = Font(bold=True)
+    for k, (campo, nombre) in enumerate(EXTRAS, start=r + 5):
+        extra = datos["extras"].get(campo)
+        ws.cell(row=k, column=1, value=nombre)
+        ws.cell(row=k, column=2, value=extra["centavos"] / 100 if extra else None)
     for fila in ws.iter_rows(min_row=4, min_col=2, max_col=col_total):
         for c in fila:
             c.number_format = FORMATO_MONEDA

@@ -38,10 +38,11 @@
     <p class="nota">Los totales de arriba son de toda la caja; abajo ves solo las filas y columnas que tenés asignadas.</p>
   {% endif %}
 
-  <form method="post" action="{{ url_for('guardar') }}" class="card">
+  <form method="post" action="{{ url_for('guardar') }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="fecha" value="{{ caja[0].isoformat() }}">
     <input type="hidden" name="turno" value="{{ turno_slug(caja) }}">
+    <section class="card">
     <div class="toolbar">
       <h2 style="margin:0">Turno actual</h2>
       <div style="display:flex;gap:8px">
@@ -80,7 +81,23 @@
         </tr></tfoot>
       </table>
     </div>
-    <div style="text-align:right;margin-top:12px"><button>Guardar</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Otros datos del turno</h2>
+      <p class="nota" style="margin:0 0 12px">No entran en las sumas de la caja.</p>
+      <div class="extras">
+        {% for campo, nombre in campos_extras %}
+          {% set extra = extras.get(campo) %}
+          <label>{{ nombre }}
+            <input name="x_{{ campo }}" inputmode="decimal" autocomplete="off" placeholder="0,00"
+                   value="{{ extra.centavos|numero if extra else '' }}"
+                   {% if extra %}title="Último cambio: {{ extra.actualizado_por }} – {{ extra.actualizado }}"{% endif %}>
+          </label>
+        {% endfor %}
+        <button>Guardar</button>
+      </div>
+    </section>
   </form>
 {% endif %}
 

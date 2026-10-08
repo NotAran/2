@@ -97,3 +97,5 @@ tr.actual td { background: var(--soft); font-weight: 600; }
 }
 details.quitadas { margin: -4px 0 14px; }
 details.quitadas .lista { margin: 6px 0 0; }
+.extras { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
+.extras input { text-align: right; font-variant-numeric: tabular-nums; font-size: 1.05rem; }
