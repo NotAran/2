@@ -29,10 +29,21 @@ from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION_ESQUEMA = 8
+VERSION_ESQUEMA = 9
 LARGO_OBSERVACIONES = 2000
 CAJAS_INICIALES = ("Caja 1", "Caja 2")
 BILLETERAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon", "Prex", "Arq", "Binance")
+# Colores (fondo, letra) de cada billetera, aproximados a los de cada marca; el admin los puede cambiar.
+COLORES_BILLETERAS = {
+    "mercado": ("#009EE3", "#FFFFFF"),
+    "naranja": ("#FF5000", "#FFFFFF"),
+    "ualá": ("#3564FD", "#FFFFFF"),
+    "personal": ("#00A9E0", "#FFFFFF"),
+    "brubank": ("#6F2CF5", "#FFFFFF"),
+    "lemon": ("#00F37F", "#111111"),
+    "prex": ("#F15A24", "#FFFFFF"),
+    "binance": ("#F0B90B", "#1E2026"),
+}
 COLUMNAS_INICIALES = (("Paco", 1), ("Antonio", 1), ("Ibra", 1))  # de la Caja 1; signo: suma o resta
 TURNOS = (("noche", "Noche"), ("manana", "Mañana"), ("tarde", "Tarde"))  # orden de los turnos en el día
 # Horario de cada turno. La noche de un día arranca a las 23:00 del día anterior,
@@ -89,7 +100,9 @@ CREATE TABLE IF NOT EXISTS filas (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT    NOT NULL UNIQUE COLLATE NOCASE,
     orden  INTEGER NOT NULL DEFAULT 0,
-    activo INTEGER NOT NULL DEFAULT 1  -- 0 = quitada pero con historial
+    activo INTEGER NOT NULL DEFAULT 1,  -- 0 = quitada pero con historial
+    color_fondo TEXT,  -- #RRGGBB; NULL = sin color
+    color_texto TEXT
 );
 CREATE TABLE IF NOT EXISTS columnas (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,7 +172,8 @@ def definicion(tabla):
 def inicializar(db):
     """Crea o actualiza las tablas y carga los datos iniciales si no hay."""
     db.execute("PRAGMA foreign_keys = OFF")  # para poder recrear tablas sin borrar en cascada
-    if db.execute("PRAGMA user_version").fetchone()[0] == 2:
+    version_previa = db.execute("PRAGMA user_version").fetchone()[0]
+    if version_previa == 2:
         db.execute("DROP TABLE IF EXISTS celdas")  # versión anterior: montos sin caja ni turno
     db.executescript(ESQUEMA)
     columnas_usuarios = columnas_de(db, "usuarios")
@@ -194,6 +208,14 @@ def inicializar(db):
         db.executemany(
             "INSERT INTO filas (nombre, orden) VALUES (?, ?)", [(n, i) for i, n in enumerate(BILLETERAS_INICIALES)]
         )
+    if "color_fondo" not in columnas_de(db, "filas"):  # versión 9: colores de las billeteras
+        db.execute("ALTER TABLE filas ADD COLUMN color_fondo TEXT")
+        db.execute("ALTER TABLE filas ADD COLUMN color_texto TEXT")
+    if version_previa < 9:  # una sola vez: colores de marca para las billeteras que no tengan
+        for fila in db.execute("SELECT id, nombre FROM filas WHERE color_fondo IS NULL").fetchall():
+            colores = COLORES_BILLETERAS.get(fila["nombre"].lower())
+            if colores:
+                db.execute("UPDATE filas SET color_fondo = ?, color_texto = ? WHERE id = ?", (*colores, fila["id"]))
     if not db.execute("SELECT 1 FROM columnas").fetchone():
         db.executemany(
             "INSERT INTO columnas (caja_id, nombre, signo, orden) VALUES (?, ?, ?, ?)",
@@ -696,7 +718,10 @@ def exportar():
     col_ultima = len(columnas) + 1
     letra = {c["id"]: get_column_letter(j) for j, c in enumerate(columnas, start=2)}
     for i, f in enumerate(filas, start=4):
-        ws.cell(row=i, column=1, value=f["nombre"])
+        nombre = ws.cell(row=i, column=1, value=f["nombre"])
+        if f["color_fondo"]:
+            nombre.fill = PatternFill("solid", fgColor=f["color_fondo"][1:])
+            nombre.font = Font(bold=True, color=(f["color_texto"] or "#000000")[1:])
         for c in columnas:
             celda = celdas.get((f["id"], c["id"]))
             ws[f"{letra[c['id']]}{i}"] = celda["centavos"] / 100 if celda else None
@@ -1077,6 +1102,27 @@ def admin_eliminar(tabla, item_id):
         flash(f"«{item['nombre']}» se eliminó.", "ok")
     db.commit()
     return volver_admin(seccion_de(tabla, item))
+
+
+def color_valido(texto):
+    texto = (texto or "").strip()
+    return texto.upper() if len(texto) == 7 and texto[0] == "#" and all(c in "0123456789abcdefABCDEF" for c in texto[1:]) else None
+
+
+@app.post("/admin/filas/<int:item_id>/color")
+def admin_color_billetera(item_id):
+    """Color de fondo y de letra de una billetera (o sin color)."""
+    db = get_db()
+    if "quitar" in request.form:
+        fondo = texto = None
+    else:
+        fondo, texto = color_valido(request.form.get("fondo")), color_valido(request.form.get("texto"))
+        if not fondo or not texto:
+            abort(400, "Color inválido.")
+    if db.execute("UPDATE filas SET color_fondo = ?, color_texto = ? WHERE id = ?", (fondo, texto, item_id)).rowcount == 0:
+        abort(404)
+    db.commit()
+    return volver_admin("billeteras")
 
 
 @app.post("/admin/<any(filas, columnas):tabla>/<int:item_id>/reactivar")

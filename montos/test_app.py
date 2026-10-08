@@ -205,6 +205,25 @@ def test_las_cajas_no_se_mezclan(client):
     assert "Paco" in columnas_de("Caja 2")
 
 
+def test_colores_de_billeteras(client):
+    crear_admin(client)
+    with montos.app.app_context():
+        colores = {f["nombre"]: (f["color_fondo"], f["color_texto"]) for f in montos.get_db().execute("SELECT * FROM filas")}
+    assert colores["Binance"] == ("#F0B90B", "#1E2026") and colores["Arq"] == (None, None)
+    pagina = client.get("/").get_data(as_text=True)
+    assert 'style="background:#F0B90B;color:#1E2026">Binance' in pagina
+
+    lemon = ids("filas")["Lemon"]
+    post(client, f"/admin/filas/{lemon}/color", fondo="#123abc", texto="#ffffff")
+    assert caja("2026-10-08", "noche")["filas"][5]["color_fondo"] == "#123ABC"
+    assert post(client, f"/admin/filas/{lemon}/color", fondo="rojo", texto="#ffffff").status_code == 400
+    post(client, f"/admin/filas/{lemon}/color", quitar="1")
+    assert caja("2026-10-08", "noche")["filas"][5]["color_fondo"] is None
+
+    ws = load_workbook(io.BytesIO(client.get(f"/exportar.xlsx?caja={id_caja()}&fecha=2026-10-08&turno=noche").data))["Caja"]
+    assert ws["A12"].value == "Binance" and ws["A12"].fill.fgColor.rgb.endswith("F0B90B")
+
+
 def test_admin_crea_y_renombra_cajas(client):
     crear_admin(client)
     post(client, "/admin/cajas", nombre="Caja 3")
