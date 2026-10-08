@@ -31,7 +31,8 @@ FILAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon"
 COLUMNAS_INICIALES = (("Paco", 1), ("Antonio", 1), ("Ibra", 1))  # signo: suma o resta en el total
 TURNOS = (("noche", "Noche"), ("manana", "Mañana"), ("tarde", "Tarde"))  # orden de las cajas en el día
 TURNO_POR_SLUG = {slug: i for i, (slug, _) in enumerate(TURNOS)}
-EXTRAS = (("bajada", "Bajada"), ("bono", "Bono"), ("saldo", "Saldo"))  # datos de cada caja que no suman
+# Datos de cada caja que no suman, en el orden en que se muestran
+EXTRAS = (("deposito", "Depósito"), ("retiro", "Retiro"), ("bono", "Bono"), ("saldo", "Saldo"), ("bajada", "Bajada"))
 DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 FORMATO_MONEDA = '"$"#,##0.00;[Red]-"$"#,##0.00'
 
@@ -317,8 +318,8 @@ def armar_caja(db, usuario, caja):
     - Turno actual: suma (con signo) de los montos de esta caja.
     - Total caja = turno anterior + turno actual.
     La grilla muestra las filas y columnas asignadas al usuario: las activas, y las
-    quitadas solo si tienen montos en esta caja. Los extras (bajada, bono, saldo)
-    no entran en ninguna suma.
+    quitadas solo si tienen montos en esta caja. Los extras (depósito, retiro, bono,
+    saldo, bajada) no entran en ninguna suma.
     """
     fecha, turno = caja[0].isoformat(), caja[1]
     filas_ok, columnas_ok = permitidas(db, usuario)
