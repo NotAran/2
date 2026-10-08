@@ -52,9 +52,7 @@ todo se puede descargar en Excel.
 - Cada usuario elige **su nombre** (el que aparece en la página) en "Mi cuenta",
   donde también puede cambiar su contraseña. Para ingresar se usa el usuario.
 - El admin crea y renombra cajas, agrega o quita billeteras y columnas de cada
-  caja, y cambia su orden con las flechas ↑ ↓. Cada billetera tiene su color de
-  fondo y de letra (al empezar, aproximados a los de cada marca), que el admin
-  puede cambiar. Cada columna puede sumar o
+  caja, y cambia su orden con las flechas ↑ ↓. Cada columna puede sumar o
   restar. Si se quita una billetera o columna que ya tiene montos, se oculta
   pero sus montos se conservan (se puede reactivar).
 - Cada celda guarda quién la modificó por última vez y cuándo (se ve al pasar

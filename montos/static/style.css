@@ -143,9 +143,3 @@ form.renombrar input { flex: 1; }
 .permiso-fila { display: grid; grid-template-columns: 220px 1fr auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); margin: 0; }
 .permiso-fila:last-child { border-bottom: 0; }
 .permiso-fila .checks { margin: 0; }
-
-/* Colores de billeteras */
-.billetera { display: inline-block; padding: 3px 10px; border-radius: 6px; font-weight: 700; }
-form.colores { display: flex; gap: 4px; align-items: center; margin: 0; }
-form.colores label { flex-direction: row; align-items: center; gap: 2px; font-weight: 700; color: var(--muted); cursor: pointer; }
-form.colores input[type=color] { width: 28px; height: 26px; padding: 1px; border-radius: 5px; cursor: pointer; }

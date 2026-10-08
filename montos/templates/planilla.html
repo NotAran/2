@@ -79,7 +79,7 @@
         <tbody>
         {% for f in filas %}
           <tr>
-            <td>{% if f.color_fondo %}<span class="billetera" style="background:{{ f.color_fondo }};color:{{ f.color_texto }}">{{ f.nombre }}</span>{% else %}{{ f.nombre }}{% endif %}</td>
+            <td>{{ f.nombre }}</td>
             {% for c in columnas %}
               {% set celda = celdas.get((f.id, c.id)) %}
               <td><input name="c_{{ f.id }}_{{ c.id }}" {{ 'readonly' if bloqueada }} inputmode="decimal" autocomplete="off" placeholder="0,00"

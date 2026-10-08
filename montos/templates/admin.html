@@ -65,17 +65,7 @@
             <button class="flechita" title="Bajar" aria-label="Bajar {{ it.nombre }}" {{ 'disabled' if loop.last }}>↓</button>
           </form>
         </span>
-        {% if tabla == 'filas' %}
-          <span class="nombre"><span class="billetera" {% if it.color_fondo %}style="background:{{ it.color_fondo }};color:{{ it.color_texto }}"{% endif %}>{{ it.nombre }}</span></span>
-          <form class="colores" method="post" action="{{ url_for('admin_color_billetera', item_id=it.id) }}">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <label title="Color de fondo"><input type="color" name="fondo" value="{{ it.color_fondo or '#FFFFFF' }}" aria-label="Fondo de {{ it.nombre }}" onchange="this.form.requestSubmit()"></label>
-            <label title="Color de letra"><input type="color" name="texto" value="{{ it.color_texto or '#1D2330' }}" aria-label="Letra de {{ it.nombre }}" onchange="this.form.requestSubmit()"><span>A</span></label>
-            {% if it.color_fondo %}<button class="link" name="quitar" value="1" title="Sin color">✕</button>{% endif %}
-          </form>
-        {% else %}
-          <span class="nombre">{{ it.nombre }}</span>
-        {% endif %}
+        <span class="nombre">{{ it.nombre }}</span>
         {% if tabla == 'columnas' %}<span class="signo {{ 'mas' if it.signo > 0 else 'menos' }}">{{ 'suma' if it.signo > 0 else 'resta' }}</span>{% endif %}
         <form method="post" action="{{ url_for('admin_eliminar', tabla=tabla, item_id=it.id) }}" data-confirm="¿Quitar la {{ tipo }} {{ it.nombre }}?">
           <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -130,7 +120,7 @@
 
   <section class="card" id="billeteras">
     <h2>Billeteras</h2>
-    <p class="nota" style="margin:0 0 8px">Son las mismas para todas las cajas. Usá las flechas para cambiar el orden y los cuadraditos para elegir el color de fondo y de letra.</p>
+    <p class="nota" style="margin:0 0 8px">Son las mismas para todas las cajas. Usá las flechas para cambiar el orden.</p>
     {{ lista_ordenable('filas', filas, 'billetera', 'No hay billeteras.') }}
     {{ quitadas('filas', filas_quitadas) }}
     <form class="alta" method="post" action="{{ url_for('admin_agregar', tabla='filas') }}">
