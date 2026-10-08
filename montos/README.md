@@ -1,23 +1,28 @@
-# Registro de montos
+# Planilla de montos
 
-Página web para ingresar montos de dinero (ingresos y gastos). Los datos se guardan
-en una base de datos SQLite interna (`montos.db`), la página calcula los totales y
-muestra los resúmenes, y todo se puede descargar como Excel.
+Página web con usuarios donde se cargan montos de dinero en una planilla de
+filas (cuentas) y columnas. Los datos se guardan en una base de datos SQLite
+interna (`montos.db`), la página calcula los totales y todo se puede descargar
+en Excel.
 
 ## Qué hace
 
-- **Cargar montos**: tipo (gasto / ingreso), monto, fecha, categoría y descripción.
-  El monto acepta `1234.56`, `1.234,56`, `$ 500`, `9.850`, etc.
-- **Cálculos**: total de ingresos, total de gastos, balance, % de ahorro,
-  gasto promedio y mayor gasto.
-- **Resúmenes**: por categoría (con % del gasto total) y por mes.
-- **Filtro por período**: elegir un mes para ver solo esos datos.
-- **Exportar a Excel** (`.xlsx`) con 4 hojas: *Movimientos*, *Resumen*,
-  *Por categoría* y *Por mes*. Las hojas de resumen usan fórmulas (`SUMIF`, etc.),
-  así que si se editan los movimientos en Excel, los totales se recalculan.
-- Eliminar movimientos.
+- **Admin**: la primera vez que se abre la página pide crear la cuenta del admin.
+- **Usuarios**: el admin crea usuarios (todos los que quiera), les cambia la
+  contraseña o los elimina.
+- **Planilla**: filas iniciales Mercado, Naranja, Ualá, Personal, Brubank, Lemon,
+  Prex, Arq y Binance; columnas iniciales Ingresos (suma) y Gastos (resta).
+  El admin puede agregar o quitar filas y columnas. Cada columna puede sumar o
+  restar en el total.
+- **Permisos**: el admin elige qué filas y qué columnas ve y carga cada usuario.
+  El admin ve y carga todo.
+- **Cálculos**: total por fila, total por columna y total general.
+- **Excel**: descarga la planilla visible con los totales como fórmulas.
+- Cada celda guarda quién la modificó por última vez y cuándo (se ve al pasar
+  el mouse por encima).
 
 Los montos se guardan en centavos (enteros) para evitar errores de redondeo.
+Se aceptan formatos como `1.234,56`, `1234.56`, `$ 500`, `9.850` o `-500`.
 
 ## Cómo ejecutarlo
 
@@ -35,7 +40,7 @@ Variables de entorno opcionales:
 |--------------|--------------------------------------------|----------------------|
 | `PORT`       | Puerto del servidor                        | `5000`               |
 | `MONTOS_DB`  | Ruta del archivo de la base de datos       | `montos/montos.db`   |
-| `SECRET_KEY` | Clave para los mensajes de la sesión       | (cambiarla en producción) |
+| `SECRET_KEY` | Clave para firmar las sesiones             | se genera sola en `.secret_key` |
 
 ## Tests
 

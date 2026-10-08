@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block contenido %}
+<h1>Planilla</h1>
+<p class="sub">Escribí los montos en las celdas y apretá <b>Guardar</b>. Para borrar un monto, dejá la celda vacía.</p>
+
+{% if not filas or not columnas %}
+  <section class="card vacio">
+    {% if usuario.es_admin %}
+      La planilla no tiene {{ 'filas' if not filas else 'columnas' }}. Agregalas desde <a href="{{ url_for('admin') }}">Admin</a>.
+    {% else %}
+      El admin todavía no te asignó filas y columnas.
+    {% endif %}
+  </section>
+{% else %}
+  <section class="kpis">
+    {% for c in columnas %}
+      <div class="kpi"><div class="k">{{ c.nombre }}</div><div class="v">{{ total_columna[c.id]|dinero }}</div></div>
+    {% endfor %}
+    <div class="kpi"><div class="k">Total</div><div class="v {{ 'pos' if total >= 0 else 'neg' }}">{{ total|dinero }}</div></div>
+  </section>
+
+  <form method="post" action="{{ url_for('guardar') }}" class="card">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="toolbar">
+      <h2 style="margin:0">{{ filas|length }} cuentas × {{ columnas|length }} columnas</h2>
+      <div style="display:flex;gap:8px">
+        <a class="btn verde" href="{{ url_for('exportar') }}">Descargar Excel</a>
+        <button>Guardar</button>
+      </div>
+    </div>
+    <div class="tabla">
+      <table class="grilla">
+        <thead><tr>
+          <th>Cuenta</th>
+          {% for c in columnas %}
+            <th class="n">{{ c.nombre }}<span class="signo {{ 'mas' if c.signo > 0 else 'menos' }}" title="{{ 'Suma' if c.signo > 0 else 'Resta' }} en el total">{{ '+' if c.signo > 0 else '−' }}</span></th>
+          {% endfor %}
+          <th class="n total">Total</th>
+        </tr></thead>
+        <tbody>
+        {% for f in filas %}
+          <tr>
+            <td>{{ f.nombre }}</td>
+            {% for c in columnas %}
+              {% set celda = celdas.get((f.id, c.id)) %}
+              <td><input name="c_{{ f.id }}_{{ c.id }}" inputmode="decimal" autocomplete="off" placeholder="0,00"
+                         aria-label="{{ f.nombre }} – {{ c.nombre }}"
+                         value="{{ celda.centavos|numero if celda else '' }}"
+                         {% if celda %}title="Último cambio: {{ celda.actualizado_por }} – {{ celda.actualizado }}"{% endif %}></td>
+            {% endfor %}
+            <td class="n total {{ 'neg' if total_fila[f.id] < 0 }}">{{ total_fila[f.id]|dinero }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot><tr>
+          <td>Total</td>
+          {% for c in columnas %}<td class="n">{{ total_columna[c.id]|dinero }}</td>{% endfor %}
+          <td class="n total {{ 'neg' if total < 0 }}">{{ total|dinero }}</td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <div style="text-align:right;margin-top:12px"><button>Guardar</button></div>
+  </form>
+{% endif %}
+{% endblock %}

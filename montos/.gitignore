@@ -1,3 +1,4 @@
 montos.db
 __pycache__/
 .pytest_cache/
+.secret_key

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block titulo %}Ingresar{% endblock %}
+{% block contenido %}
+<section class="card auth">
+  <h1>Ingresar</h1>
+  <p class="sub">Planilla de montos</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Usuario <input name="nombre" required autofocus autocomplete="username"></label>
+    <label>Contraseña <input type="password" name="clave" required autocomplete="current-password"></label>
+    <button>Ingresar</button>
+  </form>
+</section>
+{% endblock %}

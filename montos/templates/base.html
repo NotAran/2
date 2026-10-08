@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Planilla de montos{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if usuario %}
+<nav class="top"><div class="in">
+  <span class="marca">Planilla de montos</span>
+  <a href="{{ url_for('planilla') }}" class="{{ 'activo' if request.endpoint == 'planilla' }}">Planilla</a>
+  {% if usuario.es_admin %}<a href="{{ url_for('admin') }}" class="{{ 'activo' if request.endpoint == 'admin' }}">Admin</a>{% endif %}
+  <span class="quien">{{ usuario.nombre }}{% if usuario.es_admin %} (admin){% endif %}</span>
+  <form method="post" action="{{ url_for('salir') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Salir</button></form>
+</div></nav>
+{% endif %}
+<main>
+  {% with mensajes = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in mensajes %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+  {% block contenido %}{% endblock %}
+</main>
+<script>
+  document.addEventListener("submit", (e) => {
+    const mensaje = e.target.dataset.confirm;
+    if (mensaje && !confirm(mensaje)) e.preventDefault();
+  });
+</script>
+</body>
+</html>

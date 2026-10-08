@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block titulo %}Crear admin{% endblock %}
+{% block contenido %}
+<section class="card auth">
+  <h1>Bienvenido</h1>
+  <p class="sub">Es la primera vez que se abre la planilla. Creá tu cuenta: vas a ser el admin.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Usuario <input name="nombre" required autofocus autocomplete="username"></label>
+    <label>Contraseña <input type="password" name="clave" required minlength="6" autocomplete="new-password"></label>
+    <button>Crear cuenta de admin</button>
+  </form>
+</section>
+{% endblock %}
