@@ -2,7 +2,7 @@
 {% block titulo %}Admin{% endblock %}
 {% block contenido %}
 <h1>Panel de admin</h1>
-<p class="sub">Creá usuarios (admin, encargado o cajero), armá la planilla de las cajas y elegí qué filas y columnas ve y carga cada usuario. Si quitás una fila o columna que ya tiene montos, se oculta pero sus montos siguen contando en los saldos.</p>
+<p class="sub">Creá usuarios, armá las cajas (billeteras y columnas) y elegí qué cajas edita cada usuario. Si quitás una billetera o columna que ya tiene montos, se oculta pero sus montos se conservan.</p>
 
 <section class="card" id="usuarios">
   <h2>Usuarios</h2>
@@ -51,109 +51,126 @@
   </form>
 </section>
 
+{% macro lista_ordenable(tabla, items, tipo, vacio) %}
+  <ul class="lista">
+    {% for it in items %}
+      <li>
+        <span class="orden-btns">
+          <form method="post" action="{{ url_for('admin_mover', tabla=tabla, item_id=it.id) }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="direccion" value="arriba">
+            <button class="flechita" title="Subir" aria-label="Subir {{ it.nombre }}" {{ 'disabled' if loop.first }}>↑</button>
+          </form>
+          <form method="post" action="{{ url_for('admin_mover', tabla=tabla, item_id=it.id) }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="direccion" value="abajo">
+            <button class="flechita" title="Bajar" aria-label="Bajar {{ it.nombre }}" {{ 'disabled' if loop.last }}>↓</button>
+          </form>
+        </span>
+        <span class="nombre">{{ it.nombre }}</span>
+        {% if tabla == 'columnas' %}<span class="signo {{ 'mas' if it.signo > 0 else 'menos' }}">{{ 'suma' if it.signo > 0 else 'resta' }}</span>{% endif %}
+        <form method="post" action="{{ url_for('admin_eliminar', tabla=tabla, item_id=it.id) }}" data-confirm="¿Quitar la {{ tipo }} {{ it.nombre }}?">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button class="peligro">Quitar</button>
+        </form>
+      </li>
+    {% else %}
+      <li class="vacio">{{ vacio }}</li>
+    {% endfor %}
+  </ul>
+{% endmacro %}
+
+{% macro quitadas(tabla, items) %}
+  {% if items %}
+    <details class="quitadas">
+      <summary>Quitadas con historial ({{ items|length }})</summary>
+      <ul class="lista">
+        {% for q in items %}
+          <li>
+            <span class="nombre">{{ q.nombre }}</span>
+            <form method="post" action="{{ url_for('admin_reactivar', tabla=tabla, item_id=q.id) }}">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="sec">Reactivar</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+{% endmacro %}
+
 <div class="admin-grid">
-  <section class="card" id="filas">
-    <h2>Filas (cuentas)</h2>
+  <section class="card" id="cajas">
+    <h2>Cajas</h2>
     <ul class="lista">
-      {% for f in filas %}
+      {% for c in cajas %}
         <li>
-          <span class="nombre">{{ f.nombre }}</span>
-          <form method="post" action="{{ url_for('admin_eliminar', tabla='filas', item_id=f.id) }}" data-confirm="¿Quitar la fila {{ f.nombre }}?">
+          <form class="renombrar" method="post" action="{{ url_for('admin_renombrar_caja', caja_id=c.id) }}">
             <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="peligro">Quitar</button>
+            <input name="nombre" value="{{ c.nombre }}" maxlength="40" required aria-label="Nombre de la caja">
+            <button class="sec">Renombrar</button>
           </form>
         </li>
-      {% else %}
-        <li class="vacio">No hay filas.</li>
       {% endfor %}
     </ul>
-    {% if filas_quitadas %}
-      <details class="quitadas">
-        <summary>Quitadas con historial ({{ filas_quitadas|length }})</summary>
-        <ul class="lista">
-          {% for q in filas_quitadas %}
-            <li>
-              <span class="nombre">{{ q.nombre }}</span>
-              <form method="post" action="{{ url_for('admin_reactivar', tabla='filas', item_id=q.id) }}">
-                <input type="hidden" name="csrf" value="{{ csrf }}">
-                <button class="sec">Reactivar</button>
-              </form>
-            </li>
-          {% endfor %}
-        </ul>
-      </details>
-    {% endif %}
-    <form class="alta" method="post" action="{{ url_for('admin_agregar', tabla='filas') }}">
+    <form class="alta" method="post" action="{{ url_for('admin_crear_caja') }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input name="nombre" placeholder="Nueva fila" required maxlength="40" autocomplete="off">
-      <button>Agregar fila</button>
+      <input name="nombre" placeholder="Nueva caja" required maxlength="40" autocomplete="off">
+      <button>Crear caja</button>
     </form>
   </section>
 
-  <section class="card" id="columnas">
-    <h2>Columnas (personas)</h2>
-    <ul class="lista">
-      {% for c in columnas %}
-        <li>
-          <span class="nombre">{{ c.nombre }}</span>
-          <span class="signo {{ 'mas' if c.signo > 0 else 'menos' }}">{{ 'suma' if c.signo > 0 else 'resta' }}</span>
-          <form method="post" action="{{ url_for('admin_eliminar', tabla='columnas', item_id=c.id) }}" data-confirm="¿Quitar la columna {{ c.nombre }}?">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="peligro">Quitar</button>
-          </form>
-        </li>
-      {% else %}
-        <li class="vacio">No hay columnas.</li>
-      {% endfor %}
-    </ul>
-    {% if columnas_quitadas %}
-      <details class="quitadas">
-        <summary>Quitadas con historial ({{ columnas_quitadas|length }})</summary>
-        <ul class="lista">
-          {% for q in columnas_quitadas %}
-            <li>
-              <span class="nombre">{{ q.nombre }}</span>
-              <form method="post" action="{{ url_for('admin_reactivar', tabla='columnas', item_id=q.id) }}">
-                <input type="hidden" name="csrf" value="{{ csrf }}">
-                <button class="sec">Reactivar</button>
-              </form>
-            </li>
-          {% endfor %}
-        </ul>
-      </details>
-    {% endif %}
-    <form class="alta" method="post" action="{{ url_for('admin_agregar', tabla='columnas') }}">
+  <section class="card" id="billeteras">
+    <h2>Billeteras</h2>
+    <p class="nota" style="margin:0 0 8px">Son las mismas para todas las cajas. Usá las flechas para cambiar el orden.</p>
+    {{ lista_ordenable('filas', filas, 'billetera', 'No hay billeteras.') }}
+    {{ quitadas('filas', filas_quitadas) }}
+    <form class="alta" method="post" action="{{ url_for('admin_agregar', tabla='filas') }}">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input name="nombre" placeholder="Nueva columna" required maxlength="40" autocomplete="off">
-      <select name="signo" title="Cómo cuenta en el total">
-        <option value="1">Suma al total</option>
-        <option value="-1">Resta del total</option>
-      </select>
-      <button>Agregar columna</button>
+      <input name="nombre" placeholder="Nueva billetera" required maxlength="40" autocomplete="off">
+      <button>Agregar billetera</button>
     </form>
   </section>
 </div>
 
-<h2 style="margin-top:26px">Qué ve cada usuario</h2>
-{% for u in usuarios if u.rol != 'admin' %}
-  <form class="card" id="permisos-{{ u.id }}" method="post" action="{{ url_for('admin_permisos', uid=u.id) }}">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <h2>{{ nombre_de(u) }} <span class="etiqueta">{{ nombre_rol(u.rol) }}</span></h2>
-    <div class="campo">Filas</div>
-    <div class="checks">
-      {% for f in filas %}
-        <label><input type="checkbox" name="filas" value="{{ f.id }}" {{ 'checked' if f.id in permisos.filas.get(u.id, ()) }}>{{ f.nombre }}</label>
-      {% endfor %}
-    </div>
-    <div class="campo">Columnas</div>
-    <div class="checks">
-      {% for c in columnas %}
-        <label><input type="checkbox" name="columnas" value="{{ c.id }}" {{ 'checked' if c.id in permisos.columnas.get(u.id, ()) }}>{{ c.nombre }}</label>
-      {% endfor %}
-    </div>
-    <button>Guardar permisos de {{ u.nombre }}</button>
-  </form>
-{% else %}
-  <section class="card vacio">Todavía no hay usuarios. Creá uno arriba y después elegí acá qué filas y columnas ve.</section>
-{% endfor %}
+<h2 style="margin-top:26px">Columnas de cada caja</h2>
+<p class="sub">Cada caja tiene sus propias columnas. Lo que se carga en una caja no aparece ni cambia los cálculos de otra.</p>
+<div class="admin-grid">
+  {% for c in cajas %}
+    <section class="card" id="columnas-{{ c.id }}">
+      <h2>{{ c.nombre }}</h2>
+      {{ lista_ordenable('columnas', columnas[c.id].activas, 'columna', 'Todavía no tiene columnas.') }}
+      {{ quitadas('columnas', columnas[c.id].quitadas) }}
+      <form class="alta" method="post" action="{{ url_for('admin_agregar', tabla='columnas') }}">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="caja_id" value="{{ c.id }}">
+        <input name="nombre" placeholder="Nueva columna" required maxlength="40" autocomplete="off">
+        <select name="signo" title="Cómo cuenta en el total">
+          <option value="1">Suma</option>
+          <option value="-1">Resta</option>
+        </select>
+        <button>Agregar</button>
+      </form>
+    </section>
+  {% endfor %}
+</div>
+
+<h2 style="margin-top:26px" id="permisos">Qué cajas edita cada usuario</h2>
+<p class="sub">Cada usuario solo ve y carga las cajas que tenga marcadas. El admin ve todas.</p>
+<section class="card">
+  {% for u in usuarios if u.rol != 'admin' %}
+    <form class="permiso-fila" id="permisos-{{ u.id }}" method="post" action="{{ url_for('admin_permisos', uid=u.id) }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <span class="u-login">{{ nombre_de(u) }} <span class="etiqueta">{{ nombre_rol(u.rol) }}</span></span>
+      <div class="checks">
+        {% for c in cajas %}
+          <label><input type="checkbox" name="cajas" value="{{ c.id }}" {{ 'checked' if c.id in permisos.get(u.id, ()) }}>{{ c.nombre }}</label>
+        {% else %}
+          <span class="nota">No hay cajas.</span>
+        {% endfor %}
+      </div>
+      <button class="sec">Guardar</button>
+    </form>
+  {% else %}
+    <p class="vacio">Todavía no hay usuarios. Creá uno arriba y después elegí acá qué cajas edita.</p>
+  {% endfor %}
+</section>
 {% endblock %}

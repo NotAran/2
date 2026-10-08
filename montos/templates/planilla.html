@@ -1,57 +1,77 @@
 {% extends "base.html" %}
-{% block titulo %}Caja {{ nombre_caja(caja) }}{% endblock %}
+{% block titulo %}{{ caja.nombre ~ ' · ' if caja }}{{ nombre_periodo(periodo) }}{% endblock %}
 {% block contenido %}
+{% if caja is none %}
+  <section class="card vacio">
+    {% if es_admin(usuario) %}
+      No hay cajas. Creá una desde <a href="{{ url_for('admin') }}#cajas">Admin</a>.
+    {% else %}
+      El admin todavía no te asignó ninguna caja.
+    {% endif %}
+  </section>
+{% else %}
+{% if cajas|length > 1 %}
+<nav class="pestanas" aria-label="Cajas">
+  {% for c in cajas %}
+    <a href="{{ url_caja(c.id, periodo) }}" class="{{ 'activo' if c.id == caja.id }}">{{ c.nombre }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
+
 <section class="card selector">
-  <a class="flecha" href="{{ url_caja(caja_previa) }}" title="{{ nombre_caja(caja_previa) }}">← Caja anterior</a>
+  <a class="flecha" href="{{ url_caja(caja.id, periodo_previo) }}" title="{{ nombre_periodo(periodo_previo) }}">← Turno anterior</a>
   <form method="get" action="{{ url_for('planilla') }}" class="elegir">
-    <input type="date" name="fecha" value="{{ caja[0].isoformat() }}" onchange="this.form.submit()" aria-label="Fecha">
+    <input type="hidden" name="caja" value="{{ caja.id }}">
+    <input type="date" name="fecha" value="{{ periodo[0].isoformat() }}" onchange="this.form.submit()" aria-label="Fecha">
     <div class="turnos">
-      {% for c, nombre in turnos %}
-        <a href="{{ url_caja(c) }}" class="{{ 'activo' if c == caja }}">{{ nombre }}<small>{{ horarios[loop.index0] }}</small></a>
+      {% for p, nombre in turnos %}
+        <a href="{{ url_caja(caja.id, p) }}" class="{{ 'activo' if p == periodo }}">{{ nombre }}<small>{{ horarios[loop.index0] }}</small></a>
       {% endfor %}
     </div>
-    <input type="hidden" name="turno" value="{{ turno_slug(caja) }}">
+    <input type="hidden" name="turno" value="{{ turno_slug(periodo) }}">
   </form>
-  <a class="flecha" href="{{ url_caja(caja_siguiente) }}" title="{{ nombre_caja(caja_siguiente) }}">Caja siguiente →</a>
-  {% if caja != en_curso %}<a class="flecha" href="{{ url_caja(en_curso) }}">Ir al turno en curso</a>{% endif %}
+  <a class="flecha" href="{{ url_caja(caja.id, periodo_siguiente) }}" title="{{ nombre_periodo(periodo_siguiente) }}">Turno siguiente →</a>
+  {% if periodo != en_curso %}<a class="flecha" href="{{ url_caja(caja.id, en_curso) }}">Ir al turno en curso</a>{% endif %}
 </section>
 
-<h1>Caja {{ nombre_caja(caja) }}
-  {% if caja == en_curso %}<span class="etiqueta vivo">Turno en curso</span>{% elif cerrada %}<span class="etiqueta">Día cerrado</span>{% endif %}
+<h1>{{ caja.nombre }} · {{ nombre_periodo(periodo) }}
+  {% if periodo == en_curso %}<span class="etiqueta vivo">Turno en curso</span>{% elif cerrada %}<span class="etiqueta">Día cerrado</span>{% endif %}
 </h1>
 {% if bloqueada %}
-  <p class="aviso cerrado">Este día ya terminó (cerró a las 23:00 del {{ caja[0].strftime('%d/%m') }}). Solo el admin puede hacer cambios.</p>
+  <p class="aviso cerrado">Este día ya terminó (cerró a las 23:00 del {{ periodo[0].strftime('%d/%m') }}). Solo el admin puede hacer cambios.</p>
 {% elif cerrada %}
   <p class="aviso">Este día ya terminó. Como sos admin, igual podés hacer cambios.</p>
 {% endif %}
-<p class="sub">El <b>turno anterior</b> es el turno actual de la caja {{ nombre_caja(caja_previa) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
+<p class="sub">El <b>turno anterior</b> es el turno actual de {{ caja.nombre }} en {{ nombre_periodo(periodo_previo) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
 
 {% if not filas or not columnas %}
   <section class="card vacio">
     {% if es_admin(usuario) %}
-      La planilla no tiene {{ 'filas' if not filas else 'columnas' }}. Agregalas desde <a href="{{ url_for('admin') }}">Admin</a>.
+      {% if not filas %}No hay billeteras.{% else %}{{ caja.nombre }} todavía no tiene columnas.{% endif %}
+      Agregalas desde <a href="{{ url_for('admin') }}#{{ 'billeteras' if not filas else 'columnas-' ~ caja.id }}">Admin</a>.
     {% else %}
-      El admin todavía no te asignó filas y columnas.
+      {{ caja.nombre }} todavía no tiene {{ 'billeteras' if not filas else 'columnas' }}. Pedile al admin que las agregue.
     {% endif %}
   </section>
 {% else %}
 
   <form method="post" action="{{ url_for('guardar') }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="fecha" value="{{ caja[0].isoformat() }}">
-    <input type="hidden" name="turno" value="{{ turno_slug(caja) }}">
+    <input type="hidden" name="caja" value="{{ caja.id }}">
+    <input type="hidden" name="fecha" value="{{ periodo[0].isoformat() }}">
+    <input type="hidden" name="turno" value="{{ turno_slug(periodo) }}">
     <section class="card">
     <div class="toolbar">
       <h2 style="margin:0">Turno actual</h2>
       <div style="display:flex;gap:8px">
-        <a class="btn verde" href="{{ url_caja(caja, 'exportar') }}">Descargar Excel</a>
+        <a class="btn verde" href="{{ url_caja(caja.id, periodo, 'exportar') }}">Descargar Excel</a>
         {% if not bloqueada %}<button>Guardar</button>{% endif %}
       </div>
     </div>
     <div class="tabla">
       <table class="grilla">
         <thead><tr>
-          <th>Cuenta</th>
+          <th>Billetera</th>
           {% for c in columnas %}
             <th class="n">{{ c.nombre }}{% if c.signo < 0 %}<span class="signo menos" title="Resta en el total">−</span>{% endif %}</th>
           {% endfor %}
@@ -79,7 +99,7 @@
             <td>Turno actual</td>
             <td colspan="{{ columnas|length }}" class="n">
               <span class="cuenta-cols">{% for c in columnas %}{{ (' + ' if c.signo > 0 else ' − ') if not loop.first else ('− ' if c.signo < 0 else '') }}{{ total_columna[c.id]|dinero }}{% endfor %} =</span>
-              <b class="{{ 'neg' if total_grilla < 0 }}">{{ total_grilla|dinero }}</b>
+              <b class="{{ 'neg' if totales.actual < 0 }}">{{ totales.actual|dinero }}</b>
             </td>
           </tr>
         </tfoot>
@@ -87,31 +107,28 @@
     </div>
     </section>
 
-    <h2 class="titulo-cuentas">Cuentas de la caja</h2>
-  <section class="resumen">
-    <div class="kpi"><div class="k">Turno anterior</div><div class="v">{{ totales.anterior|dinero }}</div></div>
-    <span class="op">− (</span>
-    <div class="kpi"><div class="k">Turno actual</div><div class="v">{{ totales.actual|dinero }}</div></div>
-    <span class="op">+</span>
-    <div class="kpi"><div class="k">Bajada</div><div class="v">{{ totales.bajada|dinero }}</div></div>
-    <span class="op">) =</span>
-    <div class="kpi"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
+    <h2 class="titulo-cuentas">Cuentas de {{ caja.nombre }}</h2>
+    <section class="resumen">
+      <div class="kpi"><div class="k">Turno anterior</div><div class="v">{{ totales.anterior|dinero }}</div></div>
+      <span class="op">− (</span>
+      <div class="kpi"><div class="k">Turno actual</div><div class="v">{{ totales.actual|dinero }}</div></div>
+      <span class="op">+</span>
+      <div class="kpi"><div class="k">Bajada</div><div class="v">{{ totales.bajada|dinero }}</div></div>
+      <span class="op">) =</span>
+      <div class="kpi"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
 
-    <div class="kpi fila2"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
-    <span class="op">+</span>
-    <div class="kpi"><div class="k">Saldo</div><div class="v">{{ totales.saldo|dinero }}</div></div>
-    <span class="op">=</span>
-    <div class="kpi"><div class="k">Final</div><div class="v {{ 'neg' if totales.final < 0 }}">{{ totales.final|dinero }}</div></div>
+      <div class="kpi fila2"><div class="k">Resultado</div><div class="v {{ 'neg' if totales.resultado < 0 }}">{{ totales.resultado|dinero }}</div></div>
+      <span class="op">+</span>
+      <div class="kpi"><div class="k">Saldo</div><div class="v">{{ totales.saldo|dinero }}</div></div>
+      <span class="op">=</span>
+      <div class="kpi"><div class="k">Final</div><div class="v {{ 'neg' if totales.final < 0 }}">{{ totales.final|dinero }}</div></div>
 
-    <div class="kpi fila2"><div class="k">Final</div><div class="v {{ 'neg' if totales.final < 0 }}">{{ totales.final|dinero }}</div></div>
-    <span class="op">−</span>
-    <div class="kpi"><div class="k">Bono</div><div class="v">{{ totales.bono|dinero }}</div></div>
-    <span class="op">=</span>
-    <div class="kpi destacado"><div class="k">Total final</div><div class="v {{ 'pos' if totales.total_final >= 0 else 'neg' }}">{{ totales.total_final|dinero }}</div></div>
-  </section>
-  {% if total_grilla != totales.actual %}
-    <p class="nota">Estas cuentas son de toda la caja; en la grilla ves solo las filas y columnas que tenés asignadas.</p>
-  {% endif %}
+      <div class="kpi fila2"><div class="k">Final</div><div class="v {{ 'neg' if totales.final < 0 }}">{{ totales.final|dinero }}</div></div>
+      <span class="op">−</span>
+      <div class="kpi"><div class="k">Bono</div><div class="v">{{ totales.bono|dinero }}</div></div>
+      <span class="op">=</span>
+      <div class="kpi destacado"><div class="k">Total final</div><div class="v {{ 'pos' if totales.total_final >= 0 else 'neg' }}">{{ totales.total_final|dinero }}</div></div>
+    </section>
 
     <section class="card">
       <h2>Panel</h2>
@@ -148,13 +165,13 @@
 
 {% if historial %}
 <section class="card">
-  <h2>Últimas cajas</h2>
+  <h2>Últimos turnos de {{ caja.nombre }}</h2>
   <div class="tabla"><table>
-    <thead><tr><th>Caja</th><th class="n">Turno anterior</th><th class="n">Turno actual</th><th class="n">Resultado</th><th class="n">Final</th><th class="n">Total final</th></tr></thead>
+    <thead><tr><th>Turno</th><th class="n">Turno anterior</th><th class="n">Turno actual</th><th class="n">Resultado</th><th class="n">Final</th><th class="n">Total final</th></tr></thead>
     <tbody>
     {% for h in historial %}
-      <tr class="{{ 'actual' if h.caja == caja }}">
-        <td><a href="{{ url_caja(h.caja) }}">{{ nombre_caja(h.caja) }}</a></td>
+      <tr class="{{ 'actual' if h.periodo == periodo }}">
+        <td><a href="{{ url_caja(caja.id, h.periodo) }}">{{ nombre_periodo(h.periodo) }}</a></td>
         <td class="n">{{ h.anterior|dinero }}</td>
         <td class="n">{{ h.actual|dinero }}</td>
         <td class="n {{ 'neg' if h.resultado < 0 }}">{{ h.resultado|dinero }}</td>
@@ -165,5 +182,6 @@
     </tbody>
   </table></div>
 </section>
+{% endif %}
 {% endif %}
 {% endblock %}

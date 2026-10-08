@@ -36,21 +36,33 @@ def ingresar(client, nombre, clave):
     return post(client, "/login", nombre=nombre, clave=clave)
 
 
-def cargar(client, fecha, turno, **celdas):
-    """Guarda montos en una caja. celdas: {"Fila__Columna": "monto"}."""
-    f, c = ids("filas"), ids("columnas")
+def id_caja(nombre="Caja 1"):
+    return ids("cajas")[nombre]
+
+
+def columnas_de(nombre_caja="Caja 1"):
+    with montos.app.app_context():
+        return {
+            r["nombre"]: r["id"]
+            for r in montos.get_db().execute("SELECT id, nombre FROM columnas WHERE caja_id = ? ORDER BY orden, id", (id_caja(nombre_caja),))
+        }
+
+
+def cargar(client, fecha, turno, caja="Caja 1", **celdas):
+    """Guarda montos en un turno de una caja. celdas: {"Billetera__Columna": "monto"}."""
+    f, c = ids("filas"), columnas_de(caja)
     datos = {}
     for clave, monto in celdas.items():
         fila, columna = clave.split("__")
         datos[f"c_{f[fila]}_{c[columna]}"] = monto
-    return post(client, "/guardar", fecha=fecha, turno=turno, **datos)
+    return post(client, "/guardar", caja=id_caja(caja), fecha=fecha, turno=turno, **datos)
 
 
-def caja(fecha, turno, usuario="admin"):
+def caja(fecha, turno, nombre="Caja 1"):
     with montos.app.app_context():
         db = montos.get_db()
-        u = db.execute("SELECT * FROM usuarios WHERE nombre = ?", (usuario,)).fetchone()
-        return montos.armar_caja(db, u, (date.fromisoformat(fecha), montos.TURNO_POR_SLUG[turno]))
+        fila = db.execute("SELECT * FROM cajas WHERE nombre = ?", (nombre,)).fetchone()
+        return montos.armar_caja(db, fila, (date.fromisoformat(fecha), montos.TURNO_POR_SLUG[turno]))
 
 
 def ids(tabla):
@@ -94,10 +106,12 @@ def test_primera_vez_pide_crear_admin(client):
     assert client.get("/setup").headers["Location"].endswith("/login")
 
 
-def test_filas_y_columnas_iniciales(client):
+def test_cajas_billeteras_y_columnas_iniciales(client):
     crear_admin(client)
-    assert list(ids("filas")) == list(montos.FILAS_INICIALES)
-    assert list(ids("columnas")) == ["Paco", "Antonio", "Ibra"]
+    assert list(ids("cajas")) == ["Caja 1", "Caja 2"]
+    assert list(ids("filas")) == list(montos.BILLETERAS_INICIALES)
+    assert list(columnas_de("Caja 1")) == ["Paco", "Antonio", "Ibra"]
+    assert columnas_de("Caja 2") == {}
 
 
 def test_login(client):
@@ -116,8 +130,8 @@ def test_post_sin_csrf_es_rechazado(client):
 def test_admin_agrega_y_quita_filas_y_columnas(client):
     crear_admin(client)
     post(client, "/admin/filas", nombre="Efectivo")
-    post(client, "/admin/columnas", nombre="Retiros", signo="-1")
-    assert "Efectivo" in ids("filas") and "Retiros" in ids("columnas")
+    post(client, "/admin/columnas", nombre="Retiros", signo="-1", caja_id=id_caja())
+    assert "Efectivo" in ids("filas") and "Retiros" in columnas_de()
     assert "Ya existe" in post(client, "/admin/filas", nombre="efectivo").get_data(as_text=True)
 
     # sin montos: se elimina de verdad
@@ -126,7 +140,7 @@ def test_admin_agrega_y_quita_filas_y_columnas(client):
 
     # con montos: se oculta y sus montos siguen contando en los saldos
     cargar(client, "2026-10-08", "noche", Mercado__Paco="1000", Mercado__Retiros="300")
-    post(client, f"/admin/columnas/{ids('columnas')['Retiros']}/eliminar")
+    post(client, f"/admin/columnas/{columnas_de()['Retiros']}/eliminar")
     with montos.app.app_context():
         r = montos.get_db().execute("SELECT activo FROM columnas WHERE nombre = 'Retiros'").fetchone()
     assert r["activo"] == 0
@@ -137,34 +151,87 @@ def test_admin_agrega_y_quita_filas_y_columnas(client):
     assert "Retiros" in [c["nombre"] for c in caja("2026-10-08", "noche")["columnas"]]
 
     # volver a agregarla con el mismo nombre la reactiva
-    post(client, "/admin/columnas", nombre="retiros")
+    post(client, "/admin/columnas", nombre="retiros", caja_id=id_caja())
     assert "Retiros" in [c["nombre"] for c in caja("2026-10-08", "manana")["columnas"]]
 
 
-def test_usuario_ve_y_carga_solo_lo_asignado(client):
+def test_usuario_ve_y_edita_solo_sus_cajas(client):
     crear_admin(client)
-    post(client, "/admin/usuarios", nombre="paco", clave="clave123")
+    post(client, "/admin/columnas", nombre="Lucas", caja_id=id_caja("Caja 2"))
+    post(client, "/admin/usuarios", nombre="pepe", clave="clave123")
     post(client, "/admin/usuarios", nombre="ana", clave="clave456")
-    f, c = ids("filas"), ids("columnas")
-    uid = ids("usuarios")["paco"]
-    post(client, f"/admin/usuarios/{uid}/permisos", filas=[f["Mercado"], f["Lemon"]], columnas=[c["Paco"]])
+    post(client, f"/admin/usuarios/{ids('usuarios')['pepe']}/cajas", cajas=[id_caja("Caja 2")])
 
-    ingresar(client, "paco", "clave123")
-    pagina = client.get("/?fecha=2026-10-08&turno=noche").get_data(as_text=True)
-    assert "Mercado" in pagina and "Lemon" in pagina and "Brubank" not in pagina
-    assert "Antonio" not in pagina
+    ingresar(client, "pepe", "clave123")
+    pagina = client.get("/").get_data(as_text=True)
+    assert "Caja 2 · " in pagina and "Lucas" in pagina and "Paco" not in pagina and "Caja 1" not in pagina
+    assert client.get(f"/?caja={id_caja('Caja 1')}").status_code == 403
+    assert client.get(f"/exportar.xlsx?caja={id_caja('Caja 1')}").status_code == 403
     assert client.get("/admin").status_code == 403
 
-    cargar(client, "2026-10-08", "noche", Mercado__Paco="1.500", Brubank__Paco="999", Mercado__Antonio="999")
-    with montos.app.app_context():
-        celdas = montos.get_db().execute("SELECT * FROM celdas").fetchall()
-    assert [(r["fila_id"], r["columna_id"], r["centavos"], r["actualizado_por"]) for r in celdas] == [
-        (f["Mercado"], c["Paco"], 150000, "paco")  # lo no asignado se ignora
-    ]
+    cargar(client, "2026-10-08", "noche", caja="Caja 2", Mercado__Lucas="1.500")
+    assert caja("2026-10-08", "noche", "Caja 2")["totales"]["actual"] == 150000
+    # no puede guardar en una caja que no tiene asignada
+    r = post(client, "/guardar", caja=id_caja("Caja 1"), fecha="2026-10-08", turno="noche",
+             **{f"c_{ids('filas')['Mercado']}_{columnas_de()['Paco']}": "999"})
+    assert r.status_code == 403 and caja("2026-10-08", "noche")["totales"]["actual"] == 0
 
-    # un usuario sin asignaciones no ve nada
+    # un usuario sin cajas no ve nada
     ingresar(client, "ana", "clave456")
-    assert "todavía no te asignó" in client.get("/").get_data(as_text=True)
+    assert "no te asignó ninguna caja" in client.get("/").get_data(as_text=True)
+
+
+def test_las_cajas_no_se_mezclan(client):
+    crear_admin(client)
+    post(client, "/admin/columnas", nombre="Lucas", caja_id=id_caja("Caja 2"))
+    cargar(client, "2026-10-08", "noche", caja="Caja 1", Mercado__Paco="1000")
+    cargar(client, "2026-10-08", "noche", caja="Caja 2", Mercado__Lucas="300")
+    cargar(client, "2026-10-08", "manana", caja="Caja 2", Lemon__Lucas="50")
+    for campo, valor in (("x_bajada", "10"), ("observaciones", "solo caja 2")):
+        post(client, "/guardar", caja=id_caja("Caja 2"), fecha="2026-10-08", turno="manana", **{campo: valor})
+
+    c1, c2 = caja("2026-10-08", "manana", "Caja 1"), caja("2026-10-08", "manana", "Caja 2")
+    assert (c1["totales"]["anterior"], c1["totales"]["actual"], c1["totales"]["bajada"]) == (100000, 0, 0)
+    assert (c2["totales"]["anterior"], c2["totales"]["actual"], c2["totales"]["bajada"]) == (30000, 5000, 1000)
+    assert c1["observaciones"] is None and c2["observaciones"]["texto"] == "solo caja 2"
+    assert [c["nombre"] for c in c1["columnas"]] == ["Paco", "Antonio", "Ibra"]
+    assert [c["nombre"] for c in c2["columnas"]] == ["Lucas"]
+    with montos.app.app_context():
+        db = montos.get_db()
+        assert [h["actual"] for h in montos.historial(db, id_caja("Caja 1"))] == [100000]
+        assert [h["actual"] for h in montos.historial(db, id_caja("Caja 2"))] == [5000, 30000]
+    # el mismo nombre de columna puede estar en dos cajas
+    post(client, "/admin/columnas", nombre="Paco", caja_id=id_caja("Caja 2"))
+    assert "Paco" in columnas_de("Caja 2")
+
+
+def test_admin_crea_y_renombra_cajas(client):
+    crear_admin(client)
+    post(client, "/admin/cajas", nombre="Caja 3")
+    post(client, f"/admin/cajas/{id_caja('Caja 1')}/renombrar", nombre="Kiosco")
+    assert list(ids("cajas")) == ["Kiosco", "Caja 2", "Caja 3"]
+    assert "Ya existe" in post(client, "/admin/cajas", nombre="kiosco").get_data(as_text=True)
+    pagina = client.get("/").get_data(as_text=True)
+    assert "Kiosco" in pagina and "Caja 3" in pagina
+
+
+def test_reordenar_billeteras(client):
+    crear_admin(client)
+    post(client, "/admin/filas", nombre="Efectivo")
+    def orden():
+        with montos.app.app_context():
+            return [f["nombre"] for f in montos.get_db().execute("SELECT * FROM filas WHERE activo = 1 ORDER BY orden, id")]
+    assert orden()[-1] == "Efectivo"
+    for _ in range(len(montos.BILLETERAS_INICIALES)):
+        post(client, f"/admin/filas/{ids('filas')['Efectivo']}/mover", direccion="arriba")
+    assert orden()[0] == "Efectivo"
+    post(client, f"/admin/filas/{ids('filas')['Efectivo']}/mover", direccion="arriba")  # ya está primera: no cambia
+    post(client, f"/admin/filas/{ids('filas')['Efectivo']}/mover", direccion="abajo")
+    assert orden()[:2] == ["Mercado", "Efectivo"]
+    assert [f["nombre"] for f in caja("2026-10-08", "noche")["filas"]][:2] == ["Mercado", "Efectivo"]
+    # las columnas también se ordenan, dentro de su caja
+    post(client, f"/admin/columnas/{columnas_de()['Ibra']}/mover", direccion="arriba")
+    assert [c["nombre"] for c in caja("2026-10-08", "noche")["columnas"]] == ["Paco", "Ibra", "Antonio"]
 
 
 def test_niveles_y_nombres(client):
@@ -211,6 +278,42 @@ def test_migra_es_admin_a_niveles(tmp_path, monkeypatch):
     assert [tuple(x) for x in r] == [("jefe", "admin"), ("caja", "cajero")]
 
 
+def test_migra_a_varias_cajas(tmp_path):
+    """Una base de la versión 7 (sin cajas) pasa todo a la primera caja sin perder montos."""
+    ruta = tmp_path / "v7.db"
+    db = sqlite3.connect(ruta)
+    db.executescript("""
+        CREATE TABLE usuarios (id INTEGER PRIMARY KEY, nombre TEXT, clave_hash TEXT, rol TEXT, nombre_visible TEXT);
+        CREATE TABLE filas (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, orden INTEGER, activo INTEGER DEFAULT 1);
+        CREATE TABLE columnas (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, signo INTEGER, orden INTEGER, activo INTEGER DEFAULT 1);
+        CREATE TABLE celdas (fecha TEXT, turno INTEGER, fila_id INTEGER REFERENCES filas(id) ON DELETE CASCADE,
+            columna_id INTEGER REFERENCES columnas(id) ON DELETE CASCADE, centavos INTEGER, actualizado_por TEXT,
+            actualizado TEXT, PRIMARY KEY (fecha, turno, fila_id, columna_id));
+        CREATE TABLE extras (fecha TEXT, turno INTEGER, campo TEXT, centavos INTEGER, actualizado_por TEXT,
+            actualizado TEXT, PRIMARY KEY (fecha, turno, campo));
+        CREATE TABLE observaciones (fecha TEXT, turno INTEGER, texto TEXT, actualizado_por TEXT, actualizado TEXT,
+            PRIMARY KEY (fecha, turno));
+        CREATE TABLE permisos_columnas (usuario_id INTEGER, columna_id INTEGER);
+        INSERT INTO usuarios VALUES (1, 'jefe', 'x', 'admin', NULL), (2, 'caja', 'x', 'cajero', NULL);
+        INSERT INTO filas VALUES (1, 'Mercado', 0, 1);
+        INSERT INTO columnas VALUES (1, 'Paco', 1, 0, 1);
+        INSERT INTO celdas VALUES ('2026-10-08', 0, 1, 1, 5000, 'jefe', '');
+        INSERT INTO extras VALUES ('2026-10-08', 0, 'bono', 700, 'jefe', '');
+        INSERT INTO observaciones VALUES ('2026-10-08', 0, 'hola', 'jefe', '');
+        INSERT INTO permisos_columnas VALUES (2, 1);
+        PRAGMA user_version = 7;
+    """)
+    db.close()
+    montos.app.config.update(DATABASE=str(ruta))
+    with montos.app.app_context():
+        db = montos.get_db()
+        caja_1 = db.execute("SELECT * FROM cajas WHERE nombre = 'Caja 1'").fetchone()
+        d = montos.armar_caja(db, caja_1, (date(2026, 10, 8), 0))
+        assert d["totales"]["actual"] == 5000 and d["totales"]["bono"] == 700 and d["observaciones"]["texto"] == "hola"
+        assert db.execute("SELECT usuario_id, caja_id FROM permisos_cajas").fetchall()[0][:] == (2, caja_1["id"])
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 def test_eliminar_usuario_y_no_al_admin(client):
     crear_admin(client)
     post(client, "/admin/usuarios", nombre="juan", clave="clave123")
@@ -221,12 +324,12 @@ def test_eliminar_usuario_y_no_al_admin(client):
 
 # --- Cajas y cálculos ----------------------------------------------------------
 
-def test_mover_entre_cajas():
+def test_mover_entre_turnos():
     d = date(2026, 10, 8)
     assert montos.mover((d, 0), 1) == (d, 1)
     assert montos.mover((d, 2), 1) == (date(2026, 10, 9), 0)   # tarde -> noche del día siguiente
     assert montos.mover((d, 0), -1) == (date(2026, 10, 7), 2)  # noche -> tarde del día anterior
-    assert montos.nombre_caja((d, 1)) == "Jueves 08/10/2026 – Mañana"
+    assert montos.nombre_periodo((d, 1)) == "Jueves 08/10/2026 – Mañana"
 
 
 def test_turno_anterior_es_el_turno_actual_de_la_caja_previa(client):
@@ -249,7 +352,7 @@ def test_cuenta_de_la_caja(client):
     crear_admin(client)
     cargar(client, "2026-10-08", "noche", Mercado__Paco="512.000")
     cargar(client, "2026-10-08", "manana", Mercado__Paco="57.000", Lemon__Antonio="13.500", Lemon__Ibra="-9.749,50")
-    post(client, "/guardar", fecha="2026-10-08", turno="manana",
+    post(client, "/guardar", caja=id_caja(), fecha="2026-10-08", turno="manana",
          x_bajada="150.000", x_deposito="200.000", x_retiro="35.000", x_bono="12.500")
     assert caja("2026-10-08", "manana")["totales"] == {
         "anterior": 51200000, "actual": 6075050, "bajada": 15000000,
@@ -257,36 +360,20 @@ def test_cuenta_de_la_caja(client):
     }
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
     assert "$301.249,50" in pagina and "$466.249,50" in pagina and "$453.749,50" in pagina
-    assert pagina.index("Cuentas de la caja") < pagina.index("Panel")
+    assert pagina.index("Cuentas de Caja 1") < pagina.index("Panel")
 
     with montos.app.app_context():
-        h = montos.historial(montos.get_db())
-    assert [(x["caja"][1], x["final"]) for x in h] == [(1, 46624950), (0, -51200000)]
-
-
-def test_usuario_ve_los_totales_de_toda_la_caja(client):
-    crear_admin(client)
-    post(client, "/admin/usuarios", nombre="cajero", clave="clave123")
-    f, c = ids("filas"), ids("columnas")
-    post(client, f"/admin/usuarios/{ids('usuarios')['cajero']}/permisos", filas=[f["Lemon"]], columnas=[c["Ibra"]])
-    cargar(client, "2026-10-08", "noche", Mercado__Paco="1000")
-    cargar(client, "2026-10-08", "manana", Mercado__Antonio="300")
-    ingresar(client, "cajero", "clave123")
-    cargar(client, "2026-10-08", "manana", Lemon__Ibra="50")
-    d = caja("2026-10-08", "manana", usuario="cajero")
-    assert (d["totales"]["anterior"], d["totales"]["actual"]) == (100000, 35000)
-    assert d["total_grilla"] == 5000
-    pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
-    assert "son de toda la caja" in pagina and "Mercado" not in pagina
+        h = montos.historial(montos.get_db(), id_caja())
+    assert [(x["periodo"][1], x["final"]) for x in h] == [(1, 46624950), (0, -51200000)]
 
 
 def test_columna_que_resta(client):
     crear_admin(client)
-    post(client, "/admin/columnas", nombre="Retiros", signo="-1")
+    post(client, "/admin/columnas", nombre="Retiros", signo="-1", caja_id=id_caja())
     cargar(client, "2026-10-08", "noche", Mercado__Paco="1000", Mercado__Retiros="250,50")
     d = caja("2026-10-08", "noche")
-    assert d["total_columna"][ids("columnas")["Retiros"]] == 25050
-    assert d["total_grilla"] == 74950
+    assert d["total_columna"][columnas_de()["Retiros"]] == 25050
+    assert d["totales"]["actual"] == 74950
     assert d["totales"]["actual"] == 74950
 
 
@@ -304,9 +391,9 @@ def test_sin_parametros_muestra_el_turno_en_curso(client):
     ("2026-10-08 22:59", ("2026-10-08", 2)),
     ("2026-10-08 23:00", ("2026-10-09", 0)),  # la noche ya es del día siguiente
 ])
-def test_caja_en_curso(hora, caja_esperada):
+def test_periodo_en_curso(hora, caja_esperada):
     momento = datetime.strptime(hora, "%Y-%m-%d %H:%M").replace(tzinfo=montos.ZONA_HORARIA)
-    assert montos.caja_en_curso(momento) == (date.fromisoformat(caja_esperada[0]), caja_esperada[1])
+    assert montos.periodo_en_curso(momento) == (date.fromisoformat(caja_esperada[0]), caja_esperada[1])
 
 
 def test_dia_cerrado():
@@ -322,8 +409,7 @@ def test_dia_cerrado():
 def test_dia_terminado_solo_lo_cambia_el_admin(client):
     crear_admin(client)
     post(client, "/admin/usuarios", nombre="cajero", clave="clave123", rol="cajero")
-    f, c = ids("filas"), ids("columnas")
-    post(client, f"/admin/usuarios/{ids('usuarios')['cajero']}/permisos", filas=[f["Mercado"]], columnas=[c["Paco"]])
+    post(client, f"/admin/usuarios/{ids('usuarios')['cajero']}/cajas", cajas=[id_caja()])
 
     ingresar(client, "cajero", "clave123")
     r = cargar(client, "2026-10-07", "tarde", Mercado__Paco="100")  # día anterior: cerrado
@@ -355,13 +441,13 @@ def test_error_de_monto_se_informa(client):
 
 def test_guardar_sin_caja_valida(client):
     crear_admin(client)
-    assert post(client, "/guardar", fecha="mal", turno="noche").status_code == 400
+    assert post(client, "/guardar", caja=id_caja(), fecha="mal", turno="noche").status_code == 400
 
 
 def test_otros_datos_saldo_y_total_con_bajada(client):
     crear_admin(client)
     cargar(client, "2026-10-08", "noche", Mercado__Paco="1000")
-    post(client, "/guardar", fecha="2026-10-08", turno="manana",
+    post(client, "/guardar", caja=id_caja(), fecha="2026-10-08", turno="manana",
          x_deposito="2.000", x_retiro="700", x_bajada="500", x_bono="1.200,50", x_saldo="999")
     noche, manana = caja("2026-10-08", "noche"), caja("2026-10-08", "manana")
     # el saldo no se guarda aunque lo manden: se calcula
@@ -381,7 +467,7 @@ def test_otros_datos_saldo_y_total_con_bajada(client):
     assert orden == sorted(orden)
 
     # vaciar un campo lo borra; un valor inválido se informa
-    r = post(client, "/guardar", fecha="2026-10-08", turno="manana", x_retiro="", x_bono="abc")
+    r = post(client, "/guardar", caja=id_caja(), fecha="2026-10-08", turno="manana", x_retiro="", x_bono="abc")
     assert "Bono: «abc»" in r.get_data(as_text=True)
     manana = caja("2026-10-08", "manana")
     assert set(manana["extras"]) == {"deposito", "bono", "bajada"} and manana["totales"]["saldo"] == 200000
@@ -389,22 +475,22 @@ def test_otros_datos_saldo_y_total_con_bajada(client):
 
 def test_observaciones(client):
     crear_admin(client)
-    post(client, "/guardar", fecha="2026-10-08", turno="manana", observaciones="  Faltó cambio en Lemon.\r\nRevisar.  ")
+    post(client, "/guardar", caja=id_caja(), fecha="2026-10-08", turno="manana", observaciones="  Faltó cambio en Lemon.\r\nRevisar.  ")
     d = caja("2026-10-08", "manana")
     assert d["observaciones"]["texto"] == "Faltó cambio en Lemon.\nRevisar." and d["observaciones"]["actualizado_por"] == "admin"
     assert caja("2026-10-08", "noche")["observaciones"] is None  # son de cada caja
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
     assert "Faltó cambio en Lemon." in pagina
     assert pagina.index("Panel") < pagina.index("Observaciones")
-    ws = load_workbook(io.BytesIO(client.get("/exportar.xlsx?fecha=2026-10-08&turno=manana").data))["Caja"]
+    ws = load_workbook(io.BytesIO(client.get(f"/exportar.xlsx?caja={id_caja()}&fecha=2026-10-08&turno=manana").data))["Caja"]
     assert ws["A31"].value == "Observaciones" and ws["A32"].value.startswith("Faltó cambio")
 
     # vaciarlas las borra; en un día cerrado un cajero no las puede cambiar
-    post(client, "/guardar", fecha="2026-10-08", turno="manana", observaciones="")
+    post(client, "/guardar", caja=id_caja(), fecha="2026-10-08", turno="manana", observaciones="")
     assert caja("2026-10-08", "manana")["observaciones"] is None
     post(client, "/admin/usuarios", nombre="cajero", clave="clave123")
     ingresar(client, "cajero", "clave123")
-    post(client, "/guardar", fecha="2026-10-07", turno="tarde", observaciones="tarde")
+    post(client, "/guardar", caja=id_caja(), fecha="2026-10-07", turno="tarde", observaciones="tarde")
     assert caja("2026-10-07", "tarde")["observaciones"] is None
 
 
@@ -412,12 +498,12 @@ def test_exportar_excel(client):
     crear_admin(client)
     cargar(client, "2026-10-08", "noche", Mercado__Paco="1000")
     cargar(client, "2026-10-08", "manana", Mercado__Antonio="250")
-    r = client.get("/exportar.xlsx?fecha=2026-10-08&turno=manana")
+    r = client.get(f"/exportar.xlsx?caja={id_caja()}&fecha=2026-10-08&turno=manana")
     assert r.status_code == 200
     wb = load_workbook(io.BytesIO(r.data))
     ws = wb["Caja"]
-    assert ws["A1"].value == "Caja: Jueves 08/10/2026 – Mañana"
-    assert [ws.cell(row=3, column=i).value for i in range(1, 6)] == ["Cuenta", "Paco", "Antonio", "Ibra", None]
+    assert ws["A1"].value == "Caja 1: Jueves 08/10/2026 – Mañana"
+    assert [ws.cell(row=3, column=i).value for i in range(1, 6)] == ["Billetera", "Paco", "Antonio", "Ibra", None]
     assert ws["A4"].value == "Mercado" and ws["C4"].value == 250 and ws["E4"].value is None
     assert ws["A13"].value == "Total" and ws["D13"].value == "=SUM(D4:D12)" and ws["E13"].value is None
     assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(15, 23)] == [
@@ -432,6 +518,6 @@ def test_exportar_excel(client):
     hs = wb["Historial"]
     assert [c.value for c in hs[3]][1:] == ["Mañana", 1000, 250, 0, 750, 0, 750, 0, 750]
 
-    post(client, "/guardar", fecha="2026-10-08", turno="manana", x_bono="75")
-    ws = load_workbook(io.BytesIO(client.get("/exportar.xlsx?fecha=2026-10-08&turno=manana").data))["Caja"]
+    post(client, "/guardar", caja=id_caja(), fecha="2026-10-08", turno="manana", x_bono="75")
+    ws = load_workbook(io.BytesIO(client.get(f"/exportar.xlsx?caja={id_caja()}&fecha=2026-10-08&turno=manana").data))["Caja"]
     assert ws["B27"].value == 75 and ws["B22"].value == "=B20-B21"

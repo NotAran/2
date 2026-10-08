@@ -127,3 +127,19 @@ textarea { width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px soli
 textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--card); }
 textarea[readonly] { opacity: .75; cursor: not-allowed; }
 .pie-obs { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; }
+
+/* Pestañas de cajas */
+.pestanas { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.pestanas a { padding: 9px 18px; border-radius: 8px 8px 0 0; border: 1px solid var(--border); border-bottom: 3px solid transparent; background: var(--card); text-decoration: none; color: var(--text); font-weight: 600; }
+.pestanas a.activo { border-bottom-color: var(--accent); color: var(--accent); }
+
+/* Admin: orden, cajas y permisos */
+.orden-btns { display: flex; gap: 2px; }
+.orden-btns form { margin: 0; }
+button.flechita { background: transparent; color: var(--accent); border: 1px solid var(--border); padding: 2px 8px; font-weight: 700; line-height: 1.2; }
+button.flechita:disabled { opacity: .3; cursor: default; }
+form.renombrar { display: flex; gap: 8px; flex: 1; margin: 0; }
+form.renombrar input { flex: 1; }
+.permiso-fila { display: grid; grid-template-columns: 220px 1fr auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); margin: 0; }
+.permiso-fila:last-child { border-bottom: 0; }
+.permiso-fila .checks { margin: 0; }
