@@ -646,7 +646,7 @@ def exportar():
         ws.cell(row=k, column=2, value=valor)
     for k in (r + 3, r + 5, r + 7):
         ws.cell(row=k, column=1).font = ws.cell(row=k, column=2).font = Font(bold=True)
-    ws.cell(row=r + 9, column=1, value="Otros datos del turno").font = Font(bold=True)
+    ws.cell(row=r + 9, column=1, value="Panel").font = Font(bold=True)
     for campo, nombre in EXTRAS:
         extra = datos["extras"].get(campo)
         ws.cell(row=fila_extra[campo], column=1, value=nombre)

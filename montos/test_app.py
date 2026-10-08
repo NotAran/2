@@ -257,7 +257,7 @@ def test_cuenta_de_la_caja(client):
     }
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
     assert "$301.249,50" in pagina and "$466.249,50" in pagina and "$453.749,50" in pagina
-    assert pagina.index("Cuentas de la caja") < pagina.index("Otros datos del turno")
+    assert pagina.index("Cuentas de la caja") < pagina.index("Panel")
 
     with montos.app.app_context():
         h = montos.historial(montos.get_db())
@@ -395,7 +395,7 @@ def test_observaciones(client):
     assert caja("2026-10-08", "noche")["observaciones"] is None  # son de cada caja
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
     assert "Faltó cambio en Lemon." in pagina
-    assert pagina.index("Otros datos del turno") < pagina.index("Observaciones")
+    assert pagina.index("Panel") < pagina.index("Observaciones")
     ws = load_workbook(io.BytesIO(client.get("/exportar.xlsx?fecha=2026-10-08&turno=manana").data))["Caja"]
     assert ws["A31"].value == "Observaciones" and ws["A32"].value.startswith("Faltó cambio")
 
@@ -425,7 +425,7 @@ def test_exportar_excel(client):
         ("Resultado", "=B15-(B16+B17)"), ("Saldo", "=B28"), ("Final", "=B18+B19"),
         ("Bono", "=B27"), ("Total final", "=B20-B21"),
     ]
-    assert ws["A24"].value == "Otros datos del turno"
+    assert ws["A24"].value == "Panel"
     assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(25, 30)] == [
         ("Depósito", None), ("Retiro", None), ("Bono", None), ("Saldo", "=B25-B26"), ("Bajada", None)
     ]
