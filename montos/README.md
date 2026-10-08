@@ -11,9 +11,11 @@ todo se puede descargar en Excel.
   "Caja anterior / Caja siguiente".
 - Cada caja es una planilla de **cuentas** (filas: Mercado, Naranja, Ualá,
   Personal, Brubank, Lemon, Prex, Arq, Binance) por **personas** (columnas:
-  Paco, Antonio, Ibra) y se divide en:
-  - **Turno anterior**: el saldo con el que cerró la caja anterior. Se calcula solo.
-  - **Turno actual**: los montos que carga cada persona en su columna.
+  Paco, Antonio, Ibra; son solo columnas, no usuarios) y se divide en:
+  - **Turno anterior**: un solo número, el total con el que cerró la caja
+    anterior (todas las cuentas y columnas, acumulado). Se calcula solo.
+  - **Turno actual**: los montos que se cargan en cada columna, con el total
+    por cuenta y por columna.
   - **Total caja** = turno anterior + turno actual. Pasa a ser el turno anterior
     de la caja siguiente.
 - Si se corrige una caja vieja, los saldos de las cajas siguientes se actualizan solos.
@@ -27,8 +29,8 @@ todo se puede descargar en Excel.
 - El admin agrega o quita filas y columnas. Cada columna puede sumar o restar.
   Si se quita una fila o columna que ya tiene montos, se oculta pero sus montos
   siguen contando en los saldos (se puede reactivar).
-- El admin elige qué filas y columnas ve y carga cada usuario. Cada usuario ve
-  los cálculos de lo que tiene asignado; el admin ve todo.
+- El admin elige qué filas y columnas ve y carga cada usuario. Los totales de
+  la caja (turno anterior, turno actual y total) son siempre de toda la caja.
 - Cada celda guarda quién la modificó por última vez y cuándo (se ve al pasar
   el mouse por encima).
 

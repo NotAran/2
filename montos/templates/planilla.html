@@ -16,7 +16,7 @@
 </section>
 
 <h1>Caja {{ nombre_caja(caja) }}</h1>
-<p class="sub">El <b>turno anterior</b> es el saldo con el que cerró la caja {{ nombre_caja(caja_previa) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
+<p class="sub">El <b>turno anterior</b> es el total con el que cerró la caja {{ nombre_caja(caja_previa) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
 
 {% if not filas or not columnas %}
   <section class="card vacio">
@@ -27,18 +27,23 @@
     {% endif %}
   </section>
 {% else %}
-  <section class="kpis">
-    <div class="kpi"><div class="k">Turno anterior</div><div class="v">{{ totales.anterior|dinero }}</div></div>
+  <section class="resumen">
+    <div class="kpi"><div class="k">Turno anterior</div><div class="v {{ 'neg' if totales.anterior < 0 }}">{{ totales.anterior|dinero }}</div></div>
+    <span class="op">+</span>
     <div class="kpi"><div class="k">Turno actual</div><div class="v {{ 'neg' if totales.actual < 0 }}">{{ totales.actual|dinero }}</div></div>
+    <span class="op">=</span>
     <div class="kpi destacado"><div class="k">Total caja</div><div class="v {{ 'pos' if totales.caja >= 0 else 'neg' }}">{{ totales.caja|dinero }}</div></div>
   </section>
+  {% if total_grilla != totales.actual %}
+    <p class="nota">Los totales de arriba son de toda la caja; abajo ves solo las filas y columnas que tenés asignadas.</p>
+  {% endif %}
 
   <form method="post" action="{{ url_for('guardar') }}" class="card">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="fecha" value="{{ caja[0].isoformat() }}">
     <input type="hidden" name="turno" value="{{ turno_slug(caja) }}">
     <div class="toolbar">
-      <h2 style="margin:0">{{ filas|length }} cuentas</h2>
+      <h2 style="margin:0">Turno actual</h2>
       <div style="display:flex;gap:8px">
         <a class="btn verde" href="{{ url_caja(caja, 'exportar') }}">Descargar Excel</a>
         <button>Guardar</button>
@@ -46,25 +51,17 @@
     </div>
     <div class="tabla">
       <table class="grilla">
-        <thead>
-          <tr class="grupos">
-            <th rowspan="2">Cuenta</th>
-            <th rowspan="2" class="n anterior">Turno<br>anterior</th>
-            <th colspan="{{ columnas|length + 1 }}" class="centro actual-grupo">Turno actual</th>
-            <th rowspan="2" class="n total">Total<br>caja</th>
-          </tr>
-          <tr>
-            {% for c in columnas %}
-              <th class="n">{{ c.nombre }}{% if c.signo < 0 %}<span class="signo menos" title="Resta en el total">−</span>{% endif %}</th>
-            {% endfor %}
-            <th class="n subtotal">Subtotal</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Cuenta</th>
+          {% for c in columnas %}
+            <th class="n">{{ c.nombre }}{% if c.signo < 0 %}<span class="signo menos" title="Resta en el total">−</span>{% endif %}</th>
+          {% endfor %}
+          <th class="n total">Total</th>
+        </tr></thead>
         <tbody>
         {% for f in filas %}
           <tr>
             <td>{{ f.nombre }}</td>
-            <td class="n anterior {{ 'neg' if anterior[f.id] < 0 }}">{{ anterior[f.id]|dinero }}</td>
             {% for c in columnas %}
               {% set celda = celdas.get((f.id, c.id)) %}
               <td><input name="c_{{ f.id }}_{{ c.id }}" inputmode="decimal" autocomplete="off" placeholder="0,00"
@@ -72,17 +69,14 @@
                          value="{{ celda.centavos|numero if celda else '' }}"
                          {% if celda %}title="Último cambio: {{ celda.actualizado_por }} – {{ celda.actualizado }}"{% endif %}></td>
             {% endfor %}
-            <td class="n subtotal {{ 'neg' if actual[f.id] < 0 }}">{{ actual[f.id]|dinero }}</td>
             <td class="n total {{ 'neg' if total_fila[f.id] < 0 }}">{{ total_fila[f.id]|dinero }}</td>
           </tr>
         {% endfor %}
         </tbody>
         <tfoot><tr>
           <td>Total</td>
-          <td class="n anterior">{{ totales.anterior|dinero }}</td>
           {% for c in columnas %}<td class="n">{{ total_columna[c.id]|dinero }}</td>{% endfor %}
-          <td class="n subtotal">{{ totales.actual|dinero }}</td>
-          <td class="n total {{ 'neg' if totales.caja < 0 }}">{{ totales.caja|dinero }}</td>
+          <td class="n total {{ 'neg' if total_grilla < 0 }}">{{ total_grilla|dinero }}</td>
         </tr></tfoot>
       </table>
     </div>

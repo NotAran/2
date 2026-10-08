@@ -127,7 +127,7 @@ def test_admin_agrega_y_quita_filas_y_columnas(client):
     assert r["activo"] == 0
     d = caja("2026-10-08", "manana")
     assert "Retiros" not in [c["nombre"] for c in d["columnas"]]
-    assert d["anterior"][ids("filas")["Mercado"]] == 70000
+    assert d["totales"]["anterior"] == 70000
     # en la caja donde tiene montos se sigue viendo
     assert "Retiros" in [c["nombre"] for c in caja("2026-10-08", "noche")["columnas"]]
 
@@ -180,38 +180,51 @@ def test_mover_entre_cajas():
     assert montos.nombre_caja((d, 1)) == "Jueves 08/10/2026 – Mañana"
 
 
-def test_turno_anterior_arrastra_el_cierre_de_la_caja_previa(client):
+def test_turno_anterior_es_el_total_acumulado_de_la_caja_previa(client):
     crear_admin(client)
-    m = ids("filas")["Mercado"]
-    cargar(client, "2026-10-08", "noche", Mercado__Paco="1000", Mercado__Antonio="500", Lemon__Ibra="200")
-    noche = caja("2026-10-08", "noche")
-    assert noche["anterior"][m] == 0
-    assert noche["actual"][m] == 150000
-    assert noche["totales"] == {"anterior": 0, "actual": 170000, "caja": 170000}
+    # el ejemplo acordado: noche Paco 150.000 + Antonio 80.000, mañana Paco 45.000 -> tarde arranca con 275.000
+    cargar(client, "2026-10-08", "noche", Mercado__Paco="150.000", Mercado__Antonio="80.000")
+    cargar(client, "2026-10-08", "manana", Mercado__Paco="45.000")
+    noche, manana, tarde = (caja("2026-10-08", t) for t in ("noche", "manana", "tarde"))
+    assert noche["totales"] == {"anterior": 0, "actual": 23000000, "caja": 23000000}
+    assert manana["totales"] == {"anterior": 23000000, "actual": 4500000, "caja": 27500000}
+    assert tarde["totales"] == {"anterior": 27500000, "actual": 0, "caja": 27500000}
 
-    cargar(client, "2026-10-08", "manana", Mercado__Ibra="-300")
-    manana = caja("2026-10-08", "manana")
-    assert manana["anterior"][m] == 150000          # cierre de la noche
-    assert manana["total_fila"][m] == 120000
-    assert manana["totales"]["caja"] == 140000
+    # suma todas las cuentas y columnas
+    cargar(client, "2026-10-08", "tarde", Lemon__Ibra="-5.000", Prex__Antonio="1.000")
+    assert caja("2026-10-09", "noche")["totales"]["anterior"] == 27100000
 
-    # la tarde no tuvo movimientos; la noche siguiente arrastra igual
-    siguiente = caja("2026-10-09", "noche")
-    assert siguiente["anterior"][m] == 120000 and siguiente["totales"]["actual"] == 0
+    # corregir una caja vieja actualiza las siguientes
+    cargar(client, "2026-10-08", "noche", Mercado__Paco="160.000")
+    assert caja("2026-10-08", "tarde")["totales"]["anterior"] == 28500000
 
-    # corregir una caja vieja actualiza los saldos de las siguientes
-    cargar(client, "2026-10-08", "noche", Mercado__Paco="2000")
-    assert caja("2026-10-09", "noche")["anterior"][m] == 220000
+    pagina = client.get("/?fecha=2026-10-08&turno=tarde").get_data(as_text=True)
+    assert "$285.000,00" in pagina and "Miércoles" not in pagina and "Jueves 08/10/2026 – Tarde" in pagina
 
+
+def test_usuario_ve_los_totales_de_toda_la_caja(client):
+    crear_admin(client)
+    post(client, "/admin/usuarios", nombre="cajero", clave="clave123")
+    f, c = ids("filas"), ids("columnas")
+    post(client, f"/admin/usuarios/{ids('usuarios')['cajero']}/permisos", filas=[f["Lemon"]], columnas=[c["Ibra"]])
+    cargar(client, "2026-10-08", "noche", Mercado__Paco="1000")
+    cargar(client, "2026-10-08", "manana", Mercado__Antonio="300")
+    ingresar(client, "cajero", "clave123")
+    cargar(client, "2026-10-08", "manana", Lemon__Ibra="50")
+    d = caja("2026-10-08", "manana", usuario="cajero")
+    assert d["totales"] == {"anterior": 100000, "actual": 35000, "caja": 135000}
+    assert d["total_grilla"] == 5000
     pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
-    assert "$2.400,00" in pagina and "Jueves 08/10/2026 – Mañana" in pagina
+    assert "son de toda la caja" in pagina and "Mercado" not in pagina
 
 
 def test_columna_que_resta(client):
     crear_admin(client)
     post(client, "/admin/columnas", nombre="Retiros", signo="-1")
     cargar(client, "2026-10-08", "noche", Mercado__Paco="1000", Mercado__Retiros="250,50")
-    assert caja("2026-10-08", "noche")["total_fila"][ids("filas")["Mercado"]] == 74950
+    d = caja("2026-10-08", "noche")
+    assert d["total_fila"][ids("filas")["Mercado"]] == 74950
+    assert d["totales"]["actual"] == 74950
 
 
 def test_sin_parametros_muestra_la_ultima_caja_con_datos(client):
@@ -248,11 +261,10 @@ def test_exportar_excel(client):
     wb = load_workbook(io.BytesIO(r.data))
     ws = wb["Caja"]
     assert ws["A1"].value == "Caja: Jueves 08/10/2026 – Mañana"
-    assert [ws.cell(row=3, column=i).value for i in range(1, 8)] == [
-        "Cuenta", "Turno anterior", "Paco", "Antonio", "Ibra", "Turno actual", "Total caja"
-    ]
-    assert ws["A4"].value == "Mercado" and ws["B4"].value == 1000 and ws["D4"].value == 250
-    assert ws["F4"].value == "=+C4+D4+E4" and ws["G4"].value == "=B4+F4"
-    assert ws["A13"].value == "Total" and ws["G13"].value == "=SUM(G4:G12)"
+    assert [ws.cell(row=3, column=i).value for i in range(1, 6)] == ["Cuenta", "Paco", "Antonio", "Ibra", "Total"]
+    assert ws["A4"].value == "Mercado" and ws["C4"].value == 250 and ws["E4"].value == "=+B4+C4+D4"
+    assert ws["A13"].value == "Total" and ws["E13"].value == "=SUM(E4:E12)"
+    assert [ws[f"A{i}"].value for i in (15, 16, 17)] == ["Turno anterior", "Turno actual", "Total caja"]
+    assert ws["B15"].value == 1000 and ws["B16"].value == "=E13" and ws["B17"].value == "=B15+B16"
     hs = wb["Historial"]
     assert [c.value for c in hs[3]][1:] == ["Mañana", 250, 1250]

@@ -3,7 +3,7 @@
 Cada día tiene 3 cajas (turnos noche, mañana y tarde). Cada caja es una planilla
 de cuentas (filas) por personas (columnas) y se divide en:
 
-- Turno anterior: el saldo con el que cerró la caja anterior (se calcula solo).
+- Turno anterior: un solo total, con el que cerró la caja anterior (se calcula solo).
 - Turno actual: los montos que se cargan en las columnas durante el turno.
 
 Total caja = turno anterior + turno actual, y pasa a ser el turno anterior de
@@ -299,12 +299,15 @@ def permitidas(db, usuario):
 
 
 def armar_caja(db, usuario, caja):
-    """Datos y cálculos de una caja, según lo que puede ver el usuario.
+    """Datos y cálculos de una caja.
 
-    - Turno anterior de una fila: suma (con signo) de todos los montos de las cajas previas.
-    - Turno actual de una fila: suma (con signo) de los montos de esta caja.
+    Los totales son siempre de toda la caja (todas las filas y columnas):
+    - Turno anterior: total con el que cerró la caja anterior, es decir la suma
+      (con signo) de todos los montos de todas las cajas previas.
+    - Turno actual: suma (con signo) de los montos de esta caja.
     - Total caja = turno anterior + turno actual.
-    Se muestran las filas y columnas activas, y las quitadas solo si tienen montos en esta caja.
+    La grilla muestra las filas y columnas asignadas al usuario: las activas, y las
+    quitadas solo si tienen montos en esta caja.
     """
     fecha, turno = caja[0].isoformat(), caja[1]
     filas_ok, columnas_ok = permitidas(db, usuario)
@@ -314,55 +317,42 @@ def armar_caja(db, usuario, caja):
     }
     filas = [f for f in filas_ok if f["activo"] or any(k[0] == f["id"] for k in celdas)]
     columnas = [c for c in columnas_ok if c["activo"] or any(k[1] == c["id"] for k in celdas)]
-    signo = {c["id"]: c["signo"] for c in columnas_ok}
 
-    anterior = {f["id"]: 0 for f in filas}
-    previas = db.execute(
-        """SELECT fila_id, columna_id, SUM(centavos) AS suma FROM celdas
-           WHERE fecha < ? OR (fecha = ? AND turno < ?) GROUP BY fila_id, columna_id""",
-        (fecha, fecha, turno),
-    )
-    for r in previas:
-        if r["fila_id"] in anterior and r["columna_id"] in signo:
-            anterior[r["fila_id"]] += r["suma"] * signo[r["columna_id"]]
+    anterior, actual = db.execute(
+        """SELECT
+             COALESCE(SUM(CASE WHEN ce.fecha < ? OR (ce.fecha = ? AND ce.turno < ?) THEN ce.centavos * co.signo END), 0),
+             COALESCE(SUM(CASE WHEN ce.fecha = ? AND ce.turno = ? THEN ce.centavos * co.signo END), 0)
+           FROM celdas ce JOIN columnas co ON co.id = ce.columna_id""",
+        (fecha, fecha, turno, fecha, turno),
+    ).fetchone()
 
     def valor(f, c):
         celda = celdas.get((f["id"], c["id"]))
         return celda["centavos"] if celda else 0
 
-    actual = {f["id"]: sum(valor(f, c) * c["signo"] for c in columnas) for f in filas}
-    total_fila = {f["id"]: anterior[f["id"]] + actual[f["id"]] for f in filas}
+    total_fila = {f["id"]: sum(valor(f, c) * c["signo"] for c in columnas) for f in filas}
     return {
         "caja": caja,
         "filas": filas,
         "columnas": columnas,
         "celdas": celdas,
-        "anterior": anterior,
-        "actual": actual,
         "total_fila": total_fila,
         "total_columna": {c["id"]: sum(valor(f, c) for f in filas) for c in columnas},
-        "totales": {
-            "anterior": sum(anterior.values()),
-            "actual": sum(actual.values()),
-            "caja": sum(total_fila.values()),
-        },
+        "total_grilla": sum(total_fila.values()),
+        "totales": {"anterior": anterior, "actual": actual, "caja": anterior + actual},
     }
 
 
-def historial(db, usuario):
-    """Una entrada por caja con montos: movimiento del turno y saldo al cierre (más nuevas primero)."""
-    filas_ok, columnas_ok = permitidas(db, usuario)
-    ids_filas = {f["id"] for f in filas_ok}
-    signo = {c["id"]: c["signo"] for c in columnas_ok}
-    por_caja = {}
-    for r in db.execute("SELECT fecha, turno, fila_id, columna_id, centavos FROM celdas ORDER BY fecha, turno"):
-        if r["fila_id"] in ids_filas and r["columna_id"] in signo:
-            caja = (date.fromisoformat(r["fecha"]), r["turno"])
-            por_caja[caja] = por_caja.get(caja, 0) + r["centavos"] * signo[r["columna_id"]]
+def historial(db):
+    """Una entrada por caja con montos: turno actual y total al cierre (más nuevas primero)."""
     saldo, filas = 0, []
-    for caja, movimiento in por_caja.items():
-        saldo += movimiento
-        filas.append({"caja": caja, "actual": movimiento, "cierre": saldo})
+    for r in db.execute(
+        """SELECT ce.fecha, ce.turno, SUM(ce.centavos * co.signo) AS movimiento
+           FROM celdas ce JOIN columnas co ON co.id = ce.columna_id
+           GROUP BY ce.fecha, ce.turno ORDER BY ce.fecha, ce.turno"""
+    ):
+        saldo += r["movimiento"]
+        filas.append({"caja": (date.fromisoformat(r["fecha"]), r["turno"]), "actual": r["movimiento"], "cierre": saldo})
     return filas[::-1]
 
 
@@ -376,7 +366,7 @@ def planilla():
         caja_previa=mover(caja, -1),
         caja_siguiente=mover(caja, 1),
         turnos=[((caja[0], i), nombre) for i, (_, nombre) in enumerate(TURNOS)],
-        historial=historial(db, usuario_actual())[:15],
+        historial=historial(db)[:15],
     )
 
 
@@ -445,18 +435,14 @@ def exportar():
     db = get_db()
     caja = caja_pedida()
     datos = armar_caja(db, usuario_actual(), caja)
-    filas, columnas, celdas = datos["filas"], datos["columnas"], datos["celdas"]
+    filas, columnas, celdas, totales = datos["filas"], datos["columnas"], datos["celdas"], datos["totales"]
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Caja"
     ws["A1"] = f"Caja: {nombre_caja(caja)}"
     ws["A1"].font = Font(bold=True, size=13)
-    encabezados = (
-        ["Cuenta", "Turno anterior"]
-        + [f"{c['nombre']}{'' if c['signo'] > 0 else ' (−)'}" for c in columnas]
-        + ["Turno actual", "Total caja"]
-    )
+    encabezados = ["Cuenta"] + [f"{c['nombre']}{'' if c['signo'] > 0 else ' (−)'}" for c in columnas] + ["Total"]
     ws.append([])
     ws.append(encabezados)
     estilo_encabezado(ws, 3, len(encabezados))
@@ -464,26 +450,34 @@ def exportar():
         ws.column_dimensions[get_column_letter(i)].width = 16 if i > 1 else 18
     ws.freeze_panes = "B4"
 
-    col_actual, col_total = len(columnas) + 3, len(columnas) + 4
-    letra = {c["id"]: get_column_letter(j) for j, c in enumerate(columnas, start=3)}
-    l_actual = get_column_letter(col_actual)
+    col_total = len(columnas) + 2
+    letra = {c["id"]: get_column_letter(j) for j, c in enumerate(columnas, start=2)}
     for i, f in enumerate(filas, start=4):
         ws.cell(row=i, column=1, value=f["nombre"])
-        ws.cell(row=i, column=2, value=datos["anterior"][f["id"]] / 100)
         for c in columnas:
             celda = celdas.get((f["id"], c["id"]))
             ws[f"{letra[c['id']]}{i}"] = celda["centavos"] / 100 if celda else None
         terminos = "".join(f"{'+' if c['signo'] > 0 else '-'}{letra[c['id']]}{i}" for c in columnas)
-        ws.cell(row=i, column=col_actual, value=f"={terminos or 0}")
-        ws.cell(row=i, column=col_total, value=f"=B{i}+{l_actual}{i}")
+        ws.cell(row=i, column=col_total, value=f"={terminos or 0}")
 
     fila_total = len(filas) + 4
+    l_total = get_column_letter(col_total)
     ws.cell(row=fila_total, column=1, value="Total").font = Font(bold=True)
     for j in range(2, col_total + 1):
         l = get_column_letter(j)
         ws.cell(row=fila_total, column=j, value=f"=SUM({l}4:{l}{fila_total - 1})" if filas else 0).font = Font(
             bold=True
         )
+
+    # Resumen de la caja. Si el usuario ve toda la caja, el turno actual es la fórmula del total de la grilla.
+    r = fila_total + 2
+    ws.cell(row=r, column=1, value="Turno anterior")
+    ws.cell(row=r, column=2, value=totales["anterior"] / 100)
+    ws.cell(row=r + 1, column=1, value="Turno actual")
+    completa = datos["total_grilla"] == totales["actual"]
+    ws.cell(row=r + 1, column=2, value=f"={l_total}{fila_total}" if completa else totales["actual"] / 100)
+    ws.cell(row=r + 2, column=1, value="Total caja").font = Font(bold=True)
+    ws.cell(row=r + 2, column=2, value=f"=B{r}+B{r + 1}").font = Font(bold=True)
     for fila in ws.iter_rows(min_row=4, min_col=2, max_col=col_total):
         for c in fila:
             c.number_format = FORMATO_MONEDA
@@ -493,7 +487,7 @@ def exportar():
     estilo_encabezado(hs, 1, 4)
     for i, ancho in enumerate((12, 10, 16, 16), start=1):
         hs.column_dimensions[get_column_letter(i)].width = ancho
-    for h in reversed(historial(db, usuario_actual())):
+    for h in reversed(historial(db)):
         hs.append([h["caja"][0], TURNOS[h["caja"][1]][1], h["actual"] / 100, h["cierre"] / 100])
         hs.cell(row=hs.max_row, column=1).number_format = "dd/mm/yyyy"
         for col in (3, 4):
