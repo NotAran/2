@@ -134,6 +134,16 @@
         {% if not bloqueada %}<button>Guardar</button>{% endif %}
       </div>
     </section>
+
+    <section class="card">
+      <h2>Observaciones</h2>
+      <textarea name="observaciones" rows="4" maxlength="{{ largo_observaciones }}" {{ 'readonly' if bloqueada }}
+                placeholder="Anotá lo que haga falta sobre este turno…" aria-label="Observaciones">{{ observaciones.texto if observaciones else '' }}</textarea>
+      <div class="pie-obs">
+        <span class="nota" style="margin:0">{% if observaciones %}Último cambio: {{ observaciones.actualizado_por }} – {{ observaciones.actualizado }}{% endif %}</span>
+        {% if not bloqueada %}<button>Guardar</button>{% endif %}
+      </div>
+    </section>
   </form>
 {% endif %}
 

@@ -26,7 +26,7 @@ nav.top form { margin: 0; }
 
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
 label, .campo { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; color: var(--muted); }
-input, select, button { font: inherit; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+input, select, button, textarea { font: inherit; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
 button, a.btn { background: var(--accent); color: #fff; border: 0; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; padding: 9px 14px; border-radius: 7px; }
 button:hover, a.btn:hover { filter: brightness(1.08); }
 button.sec { background: transparent; color: var(--accent); border: 1px solid var(--border); }
@@ -123,3 +123,7 @@ input[readonly] { opacity: .75; cursor: not-allowed; }
 table.grilla tfoot tr.totales-col td { background: var(--soft); }
 table.grilla tfoot tr.turno-actual td { border-top: 0; font-size: 1.05rem; }
 table.grilla tfoot .cuenta-cols { color: var(--muted); font-weight: 500; margin-right: 8px; font-size: .9rem; }
+textarea { width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); resize: vertical; line-height: 1.45; }
+textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--card); }
+textarea[readonly] { opacity: .75; cursor: not-allowed; }
+.pie-obs { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; }

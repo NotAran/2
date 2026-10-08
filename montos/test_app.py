@@ -387,6 +387,27 @@ def test_otros_datos_saldo_y_total_con_bajada(client):
     assert set(manana["extras"]) == {"deposito", "bono", "bajada"} and manana["totales"]["saldo"] == 200000
 
 
+def test_observaciones(client):
+    crear_admin(client)
+    post(client, "/guardar", fecha="2026-10-08", turno="manana", observaciones="  Faltó cambio en Lemon.\r\nRevisar.  ")
+    d = caja("2026-10-08", "manana")
+    assert d["observaciones"]["texto"] == "Faltó cambio en Lemon.\nRevisar." and d["observaciones"]["actualizado_por"] == "admin"
+    assert caja("2026-10-08", "noche")["observaciones"] is None  # son de cada caja
+    pagina = client.get("/?fecha=2026-10-08&turno=manana").get_data(as_text=True)
+    assert "Faltó cambio en Lemon." in pagina
+    assert pagina.index("Otros datos del turno") < pagina.index("Observaciones")
+    ws = load_workbook(io.BytesIO(client.get("/exportar.xlsx?fecha=2026-10-08&turno=manana").data))["Caja"]
+    assert ws["A31"].value == "Observaciones" and ws["A32"].value.startswith("Faltó cambio")
+
+    # vaciarlas las borra; en un día cerrado un cajero no las puede cambiar
+    post(client, "/guardar", fecha="2026-10-08", turno="manana", observaciones="")
+    assert caja("2026-10-08", "manana")["observaciones"] is None
+    post(client, "/admin/usuarios", nombre="cajero", clave="clave123")
+    ingresar(client, "cajero", "clave123")
+    post(client, "/guardar", fecha="2026-10-07", turno="tarde", observaciones="tarde")
+    assert caja("2026-10-07", "tarde")["observaciones"] is None
+
+
 def test_exportar_excel(client):
     crear_admin(client)
     cargar(client, "2026-10-08", "noche", Mercado__Paco="1000")

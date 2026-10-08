@@ -30,6 +30,7 @@ todo se puede descargar en Excel.
 - **Otros datos del turno**: Depósito, Retiro, Bono, Saldo y Bajada, un monto de
   cada uno por caja. No suman en el turno actual. El saldo se calcula solo:
   depósito − retiro.
+- **Observaciones**: un texto libre por caja, debajo de los otros datos.
 - Si se corrige una caja, el turno anterior de la siguiente se actualiza solo.
 - **Últimas cajas**: lista con turno anterior, turno actual, resultado y final de cada caja.
 - **Excel**: descarga la caja elegida (con los totales como fórmulas) y el historial.

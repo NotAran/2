@@ -28,7 +28,8 @@ from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION_ESQUEMA = 6
+VERSION_ESQUEMA = 7
+LARGO_OBSERVACIONES = 2000
 FILAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon", "Prex", "Arq", "Binance")
 COLUMNAS_INICIALES = (("Paco", 1), ("Antonio", 1), ("Ibra", 1))  # signo: suma o resta en el total
 TURNOS = (("noche", "Noche"), ("manana", "Mañana"), ("tarde", "Tarde"))  # orden de las cajas en el día
@@ -107,6 +108,14 @@ CREATE TABLE IF NOT EXISTS extras (
     actualizado_por TEXT,
     actualizado     TEXT,
     PRIMARY KEY (fecha, turno, campo)
+);
+CREATE TABLE IF NOT EXISTS observaciones (
+    fecha           TEXT    NOT NULL,
+    turno           INTEGER NOT NULL CHECK (turno IN (0, 1, 2)),
+    texto           TEXT    NOT NULL,
+    actualizado_por TEXT,
+    actualizado     TEXT,
+    PRIMARY KEY (fecha, turno)
 );
 CREATE TABLE IF NOT EXISTS permisos_filas (
     usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -430,6 +439,9 @@ def armar_caja(db, usuario, caja):
         "total_grilla": sum(total_columna[c["id"]] * c["signo"] for c in columnas),
         "totales": calcular_totales(turno_actual(db, mover(caja, -1)), turno_actual(db, caja), montos_extras),
         "extras": extras,
+        "observaciones": db.execute(
+            "SELECT * FROM observaciones WHERE fecha = ? AND turno = ?", (fecha, turno)
+        ).fetchone(),
     }
 
 
@@ -463,6 +475,7 @@ def planilla():
         turnos=[((caja[0], i), nombre) for i, (_, nombre) in enumerate(TURNOS)],
         historial=historial(db)[:15],
         campos_extras=EXTRAS,
+        largo_observaciones=LARGO_OBSERVACIONES,
         horarios=HORARIOS,
         en_curso=caja_en_curso(),
         cerrada=dia_cerrado(caja),
@@ -540,6 +553,24 @@ def guardar():
                 (fecha, turno, campo, centavos, nombre_de(usuario), momento),
             )
         cambios += 1
+
+    if "observaciones" in request.form:
+        texto = request.form["observaciones"].replace("\r\n", "\n").strip()[:LARGO_OBSERVACIONES]
+        anterior = datos["observaciones"]["texto"] if datos["observaciones"] else ""
+        if texto != anterior:
+            if texto:
+                db.execute(
+                    """INSERT INTO observaciones (fecha, turno, texto, actualizado_por, actualizado)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT (fecha, turno) DO UPDATE SET
+                         texto = excluded.texto,
+                         actualizado_por = excluded.actualizado_por,
+                         actualizado = excluded.actualizado""",
+                    (fecha, turno, texto, nombre_de(usuario), momento),
+                )
+            else:
+                db.execute("DELETE FROM observaciones WHERE fecha = ? AND turno = ?", (fecha, turno))
+            cambios += 1
 
     db.commit()
     for error in errores:
@@ -621,6 +652,10 @@ def exportar():
         ws.cell(row=fila_extra[campo], column=1, value=nombre)
         ws.cell(row=fila_extra[campo], column=2, value=extra["centavos"] / 100 if extra else None)
     ws.cell(row=fila_extra["saldo"], column=2, value=f"=B{fila_extra['deposito']}-B{fila_extra['retiro']}")
+    fila_obs = fila_extra[EXTRAS[-1][0]] + 2
+    ws.cell(row=fila_obs, column=1, value="Observaciones").font = Font(bold=True)
+    if datos["observaciones"]:
+        ws.cell(row=fila_obs + 1, column=1, value=datos["observaciones"]["texto"])
     for fila in ws.iter_rows(min_row=4, min_col=2, max_col=max(col_ultima, 2)):
         for c in fila:
             c.number_format = FORMATO_MONEDA
