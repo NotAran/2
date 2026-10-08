@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registro de montos</title>
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #ffffff; --text: #1d2330; --muted: #667085; --border: #e3e6eb;
+      --accent: #2f5597; --ok: #157347; --bad: #b42318; --ok-bg: #e7f5ec; --bad-bg: #fdecea;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151b; --card: #1b2029; --text: #e7eaf0; --muted: #9aa3b2; --border: #2c3340;
+        --accent: #7aa2e3; --ok: #4cc38a; --bad: #f97066; --ok-bg: #16301f; --bad-bg: #3a1a18;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    h2 { font-size: 1.05rem; margin: 0 0 12px; }
+    p.sub { color: var(--muted); margin: 0 0 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+    form.alta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
+    label, .campo { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; color: var(--muted); }
+    input, select, button { font: inherit; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+    input.monto { font-size: 1.1rem; font-weight: 600; }
+    button { background: var(--accent); color: #fff; border: 0; cursor: pointer; font-weight: 600; }
+    button:hover { filter: brightness(1.08); }
+    .tipo { display: flex; gap: 6px; }
+    .tipo input { display: none; }
+    .tipo label { flex: 1; }
+    .tipo span { display: block; font-size: .95rem; flex: 1; text-align: center; padding: 9px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; color: var(--text); }
+    .tipo input[value=ingreso]:checked + span { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); font-weight: 600; }
+    .tipo input[value=gasto]:checked + span { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); font-weight: 600; }
+    .flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; }
+    .flash.ok { background: var(--ok-bg); color: var(--ok); }
+    .flash.error { background: var(--bad-bg); color: var(--bad); }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .kpi .k { font-size: .8rem; color: var(--muted); }
+    .kpi .v { font-size: 1.25rem; overflow-wrap: anywhere; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .pos { color: var(--ok); } .neg { color: var(--bad); }
+    .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+    .grid2 .card { margin-bottom: 0; }
+    .tabla { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    th, td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; }
+    th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+    td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .barra { height: 6px; background: var(--bad); border-radius: 3px; opacity: .75; margin-top: 4px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .toolbar form { display: flex; gap: 8px; align-items: center; }
+    a.btn { display: inline-block; padding: 9px 14px; border-radius: 7px; background: var(--ok); color: #fff; text-decoration: none; font-weight: 600; }
+    button.borrar { background: transparent; color: var(--muted); padding: 2px 8px; font-weight: 400; }
+    button.borrar:hover { color: var(--bad); }
+    .vacio { color: var(--muted); text-align: center; padding: 24px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Registro de montos</h1>
+  <p class="sub">Ingresá montos de dinero; se guardan en la base de datos interna, se calculan los totales y podés descargar todo en Excel.</p>
+
+  {% with mensajes = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in mensajes %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+
+  <section class="card">
+    <h2>Nuevo movimiento</h2>
+    <form class="alta" method="post" action="{{ url_for('agregar', mes=mes) }}">
+      <div class="campo">Tipo
+        <div class="tipo">
+          <label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label>
+          <label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label>
+        </div>
+      </div>
+      <label>Monto
+        <input class="monto" name="monto" inputmode="decimal" placeholder="0,00" required autofocus autocomplete="off">
+      </label>
+      <label>Fecha
+        <input type="date" name="fecha" value="{{ hoy }}" required>
+      </label>
+      <label>Categoría
+        <input name="categoria" list="categorias" placeholder="General" maxlength="60">
+        <datalist id="categorias">
+          {% for c in categorias %}<option value="{{ c }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>Descripción
+        <input name="descripcion" placeholder="Opcional" maxlength="200">
+      </label>
+      <button type="submit">Guardar</button>
+    </form>
+  </section>
+
+  <div class="toolbar">
+    <form method="get" action="{{ url_for('index') }}">
+      <label style="flex-direction:row;align-items:center;gap:8px">Período
+        <input type="month" name="mes" value="{{ mes }}" onchange="this.form.submit()">
+      </label>
+      {% if mes %}<a href="{{ url_for('index') }}">Ver todo</a>{% endif %}
+    </form>
+    <a class="btn" href="{{ url_for('exportar', mes=mes) }}">Descargar Excel</a>
+  </div>
+
+  <section class="kpis">
+    <div class="kpi"><div class="k">Ingresos</div><div class="v pos">{{ totales.ingresos|dinero }}</div></div>
+    <div class="kpi"><div class="k">Gastos</div><div class="v neg">{{ totales.gastos|dinero }}</div></div>
+    <div class="kpi"><div class="k">Balance</div><div class="v {{ 'pos' if totales.balance >= 0 else 'neg' }}">{{ totales.balance|dinero }}</div></div>
+    <div class="kpi"><div class="k">% de ahorro</div><div class="v">{{ totales.ahorro_pct|pct if totales.ahorro_pct is not none else '—' }}</div></div>
+    <div class="kpi"><div class="k">Gasto promedio</div><div class="v">{{ totales.gasto_promedio|dinero }}</div></div>
+    <div class="kpi"><div class="k">Mayor gasto</div><div class="v">{{ totales.mayor_gasto|dinero }}</div></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Por categoría{% if mes %} ({{ mes }}){% endif %}</h2>
+      {% set max_gasto = (por_categoria|map(attribute='gastos')|max) if por_categoria else 0 %}
+      <div class="tabla"><table>
+        <thead><tr><th>Categoría</th><th class="n">Ingresos</th><th class="n">Gastos</th><th class="n">% gastos</th></tr></thead>
+        <tbody>
+        {% for c in por_categoria %}
+          <tr>
+            <td>{{ c.categoria }}
+              {% if c.gastos and max_gasto %}<div class="barra" style="width: {{ (100 * c.gastos / max_gasto)|round(1) }}%"></div>{% endif %}
+            </td>
+            <td class="n">{{ c.ingresos|dinero }}</td>
+            <td class="n">{{ c.gastos|dinero }}</td>
+            <td class="n">{{ (100 * c.gastos / totales.gastos)|pct if c.gastos else '—' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="vacio">Sin datos todavía.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <h2>Por mes</h2>
+      <div class="tabla"><table>
+        <thead><tr><th>Mes</th><th class="n">Ingresos</th><th class="n">Gastos</th><th class="n">Balance</th></tr></thead>
+        <tbody>
+        {% for r in por_mes %}
+          <tr>
+            <td style="white-space:nowrap"><a href="{{ url_for('index', mes=r.mes) }}">{{ r.mes }}</a></td>
+            <td class="n">{{ r.ingresos|dinero }}</td>
+            <td class="n">{{ r.gastos|dinero }}</td>
+            <td class="n {{ 'pos' if r.ingresos >= r.gastos else 'neg' }}">{{ (r.ingresos - r.gastos)|dinero }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="vacio">Sin datos todavía.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:18px">
+    <h2>Movimientos{% if mes %} de {{ mes }}{% endif %} ({{ totales.cantidad }})</h2>
+    <div class="tabla"><table>
+      <thead><tr><th>Fecha</th><th>Descripción</th><th>Categoría</th><th class="n">Monto</th><th></th></tr></thead>
+      <tbody>
+      {% for m in movimientos %}
+        <tr>
+          <td style="white-space:nowrap">{{ m.fecha }}</td>
+          <td>{{ m.descripcion or '—' }}</td>
+          <td>{{ m.categoria }}</td>
+          <td class="n {{ 'pos' if m.tipo == 'ingreso' else 'neg' }}">{{ ('+' if m.tipo == 'ingreso' else '−') }}{{ m.centavos|dinero }}</td>
+          <td class="n">
+            <form method="post" action="{{ url_for('eliminar', mov_id=m.id, mes=mes) }}" onsubmit="return confirm('¿Eliminar este movimiento?')">
+              <button class="borrar" title="Eliminar">✕</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="vacio">Todavía no cargaste ningún monto.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+</main>
+</body>
+</html>
