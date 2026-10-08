@@ -73,7 +73,6 @@
           {% for c in columnas %}
             <th class="n">{{ c.nombre }}{% if c.signo < 0 %}<span class="signo menos" title="Resta en el total">−</span>{% endif %}</th>
           {% endfor %}
-          <th class="n total">Total</th>
         </tr></thead>
         <tbody>
         {% for f in filas %}
@@ -86,15 +85,22 @@
                          value="{{ celda.centavos|numero if celda else '' }}"
                          {% if celda %}title="Último cambio: {{ celda.actualizado_por }} – {{ celda.actualizado }}"{% endif %}></td>
             {% endfor %}
-            <td class="n total {{ 'neg' if total_fila[f.id] < 0 }}">{{ total_fila[f.id]|dinero }}</td>
           </tr>
         {% endfor %}
         </tbody>
-        <tfoot><tr>
-          <td>Total</td>
-          {% for c in columnas %}<td class="n">{{ total_columna[c.id]|dinero }}</td>{% endfor %}
-          <td class="n total {{ 'neg' if total_grilla < 0 }}">{{ total_grilla|dinero }}</td>
-        </tr></tfoot>
+        <tfoot>
+          <tr class="totales-col">
+            <td>Total</td>
+            {% for c in columnas %}<td class="n {{ 'neg' if total_columna[c.id] < 0 }}">{{ total_columna[c.id]|dinero }}</td>{% endfor %}
+          </tr>
+          <tr class="turno-actual">
+            <td>Turno actual</td>
+            <td colspan="{{ columnas|length }}" class="n">
+              <span class="cuenta-cols">{% for c in columnas %}{{ (' + ' if c.signo > 0 else ' − ') if not loop.first else ('− ' if c.signo < 0 else '') }}{{ total_columna[c.id]|dinero }}{% endfor %} =</span>
+              <b class="{{ 'neg' if total_grilla < 0 }}">{{ total_grilla|dinero }}</b>
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </div>
     </section>

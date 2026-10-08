@@ -283,7 +283,8 @@ def test_columna_que_resta(client):
     post(client, "/admin/columnas", nombre="Retiros", signo="-1")
     cargar(client, "2026-10-08", "noche", Mercado__Paco="1000", Mercado__Retiros="250,50")
     d = caja("2026-10-08", "noche")
-    assert d["total_fila"][ids("filas")["Mercado"]] == 74950
+    assert d["total_columna"][ids("columnas")["Retiros"]] == 25050
+    assert d["total_grilla"] == 74950
     assert d["totales"]["actual"] == 74950
 
 
@@ -393,11 +394,11 @@ def test_exportar_excel(client):
     wb = load_workbook(io.BytesIO(r.data))
     ws = wb["Caja"]
     assert ws["A1"].value == "Caja: Jueves 08/10/2026 – Mañana"
-    assert [ws.cell(row=3, column=i).value for i in range(1, 6)] == ["Cuenta", "Paco", "Antonio", "Ibra", "Total"]
-    assert ws["A4"].value == "Mercado" and ws["C4"].value == 250 and ws["E4"].value == "=+B4+C4+D4"
-    assert ws["A13"].value == "Total" and ws["E13"].value == "=SUM(E4:E12)"
+    assert [ws.cell(row=3, column=i).value for i in range(1, 6)] == ["Cuenta", "Paco", "Antonio", "Ibra", None]
+    assert ws["A4"].value == "Mercado" and ws["C4"].value == 250 and ws["E4"].value is None
+    assert ws["A13"].value == "Total" and ws["D13"].value == "=SUM(D4:D12)" and ws["E13"].value is None
     assert [(ws[f"A{i}"].value, ws[f"B{i}"].value) for i in range(15, 21)] == [
-        ("Turno anterior", 1000), ("Turno actual", "=E13"), ("Bajada", "=B27"),
+        ("Turno anterior", 1000), ("Turno actual", "=+B13+C13+D13"), ("Bajada", "=B27"),
         ("Resultado", "=B15-(B16+B17)"), ("Saldo", "=B26"), ("Final", "=B18-B19"),
     ]
     assert ws["A22"].value == "Otros datos del turno"

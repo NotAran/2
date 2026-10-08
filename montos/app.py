@@ -414,15 +414,15 @@ def armar_caja(db, usuario, caja):
         celda = celdas.get((f["id"], c["id"]))
         return celda["centavos"] if celda else 0
 
-    total_fila = {f["id"]: sum(valor(f, c) * c["signo"] for c in columnas) for f in filas}
+    # Se suma cada columna, y el total de la grilla es la suma de los totales de las columnas
+    total_columna = {c["id"]: sum(valor(f, c) for f in filas) for c in columnas}
     return {
         "caja": caja,
         "filas": filas,
         "columnas": columnas,
         "celdas": celdas,
-        "total_fila": total_fila,
-        "total_columna": {c["id"]: sum(valor(f, c) for f in filas) for c in columnas},
-        "total_grilla": sum(total_fila.values()),
+        "total_columna": total_columna,
+        "total_grilla": sum(total_columna[c["id"]] * c["signo"] for c in columnas),
         "totales": calcular_totales(turno_actual(db, mover(caja, -1)), turno_actual(db, caja), montos_extras),
         "extras": extras,
     }
@@ -565,7 +565,7 @@ def exportar():
     ws.title = "Caja"
     ws["A1"] = f"Caja: {nombre_caja(caja)}"
     ws["A1"].font = Font(bold=True, size=13)
-    encabezados = ["Cuenta"] + [f"{c['nombre']}{'' if c['signo'] > 0 else ' (−)'}" for c in columnas] + ["Total"]
+    encabezados = ["Cuenta"] + [f"{c['nombre']}{'' if c['signo'] > 0 else ' (−)'}" for c in columnas]
     ws.append([])
     ws.append(encabezados)
     estilo_encabezado(ws, 3, len(encabezados))
@@ -573,32 +573,31 @@ def exportar():
         ws.column_dimensions[get_column_letter(i)].width = 16 if i > 1 else 18
     ws.freeze_panes = "B4"
 
-    col_total = len(columnas) + 2
+    col_ultima = len(columnas) + 1
     letra = {c["id"]: get_column_letter(j) for j, c in enumerate(columnas, start=2)}
     for i, f in enumerate(filas, start=4):
         ws.cell(row=i, column=1, value=f["nombre"])
         for c in columnas:
             celda = celdas.get((f["id"], c["id"]))
             ws[f"{letra[c['id']]}{i}"] = celda["centavos"] / 100 if celda else None
-        terminos = "".join(f"{'+' if c['signo'] > 0 else '-'}{letra[c['id']]}{i}" for c in columnas)
-        ws.cell(row=i, column=col_total, value=f"={terminos or 0}")
 
     fila_total = len(filas) + 4
-    l_total = get_column_letter(col_total)
     ws.cell(row=fila_total, column=1, value="Total").font = Font(bold=True)
-    for j in range(2, col_total + 1):
+    for j in range(2, col_ultima + 1):
         l = get_column_letter(j)
         ws.cell(row=fila_total, column=j, value=f"=SUM({l}4:{l}{fila_total - 1})" if filas else 0).font = Font(
             bold=True
         )
 
-    # Resumen de la caja. Si el usuario ve toda la caja, el turno actual es la fórmula del total de la grilla.
+    # Resumen de la caja. Si el usuario ve toda la caja, el turno actual es la suma de los totales de las columnas.
     r = fila_total + 2
     fila_extra = {campo: k for k, (campo, _) in enumerate(EXTRAS, start=r + 8)}
     completa = datos["total_grilla"] == totales["actual"]
+    terminos = "".join(f"{'+' if c['signo'] > 0 else '-'}{letra[c['id']]}{fila_total}" for c in columnas)
+    turno_actual_excel = f"={terminos or 0}"
     resumen = (
         ("Turno anterior", totales["anterior"] / 100),
-        ("Turno actual", f"={l_total}{fila_total}" if completa else totales["actual"] / 100),
+        ("Turno actual", turno_actual_excel if completa else totales["actual"] / 100),
         ("Bajada", f"=B{fila_extra['bajada']}"),
         ("Resultado", f"=B{r}-(B{r + 1}+B{r + 2})"),
         ("Saldo", f"=B{fila_extra['saldo']}"),
@@ -615,7 +614,7 @@ def exportar():
         ws.cell(row=fila_extra[campo], column=1, value=nombre)
         ws.cell(row=fila_extra[campo], column=2, value=extra["centavos"] / 100 if extra else None)
     ws.cell(row=fila_extra["saldo"], column=2, value=f"=B{fila_extra['deposito']}-B{fila_extra['retiro']}")
-    for fila in ws.iter_rows(min_row=4, min_col=2, max_col=col_total):
+    for fila in ws.iter_rows(min_row=4, min_col=2, max_col=max(col_ultima, 2)):
         for c in fila:
             c.number_format = FORMATO_MONEDA
 

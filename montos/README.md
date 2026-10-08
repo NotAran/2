@@ -19,8 +19,8 @@ todo se puede descargar en Excel.
 - Cada caja es una planilla de **cuentas** (filas: Mercado, Naranja, Ualá,
   Personal, Brubank, Lemon, Prex, Arq, Binance) por **personas** (columnas:
   Paco, Antonio, Ibra; son solo columnas, no usuarios) y se divide en:
-  - **Turno actual**: la suma de todas las columnas (cada columna es la suma
-    de sus filas).
+  - **Turno actual**: se suma cada columna (su total se ve en la fila "Total")
+    y después se suman los totales de las columnas.
   - **Turno anterior**: el turno actual de la caja inmediatamente anterior
     (0 si esa caja no tuvo montos). Se calcula solo.
 - **Cuenta de la caja** (arriba de todo):

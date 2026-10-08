@@ -119,3 +119,6 @@ details.quitadas .lista { margin: 6px 0 0; }
 .aviso { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; background: var(--soft); border: 1px solid var(--border); }
 .aviso.cerrado { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
 input[readonly] { opacity: .75; cursor: not-allowed; }
+table.grilla tfoot tr.totales-col td { background: var(--soft); }
+table.grilla tfoot tr.turno-actual td { border-top: 0; font-size: 1.05rem; }
+table.grilla tfoot .cuenta-cols { color: var(--muted); font-weight: 500; margin-right: 8px; font-size: .9rem; }
