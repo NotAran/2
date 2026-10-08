@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block titulo %}Mi cuenta{% endblock %}
+{% block contenido %}
+<section class="card auth">
+  <h1>Mi cuenta</h1>
+  <p class="sub">Ingresás como <b>{{ usuario.nombre }}</b> · nivel {{ nombre_rol(usuario.rol) }}</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Tu nombre (como aparece en la página)
+      <input name="nombre_visible" maxlength="40" value="{{ usuario.nombre_visible or '' }}" placeholder="{{ usuario.nombre }}">
+    </label>
+    <details>
+      <summary>Cambiar contraseña</summary>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+        <label>Contraseña actual <input type="password" name="clave_actual" autocomplete="current-password"></label>
+        <label>Contraseña nueva <input type="password" name="clave_nueva" minlength="6" autocomplete="new-password"></label>
+      </div>
+    </details>
+    <button>Guardar</button>
+  </form>
+</section>
+{% endblock %}

@@ -11,8 +11,8 @@
 <nav class="top"><div class="in">
   <span class="marca">Cajas por turno</span>
   <a href="{{ url_for('planilla') }}" class="{{ 'activo' if request.endpoint == 'planilla' }}">Cajas</a>
-  {% if usuario.es_admin %}<a href="{{ url_for('admin') }}" class="{{ 'activo' if request.endpoint == 'admin' }}">Admin</a>{% endif %}
-  <span class="quien">{{ usuario.nombre }}{% if usuario.es_admin %} (admin){% endif %}</span>
+  {% if es_admin(usuario) %}<a href="{{ url_for('admin') }}" class="{{ 'activo' if request.endpoint == 'admin' }}">Admin</a>{% endif %}
+  <a href="{{ url_for('cuenta') }}" class="quien {{ 'activo' if request.endpoint == 'cuenta' }}" title="Mi cuenta">{{ nombre_de(usuario) }} · {{ nombre_rol(usuario.rol) }}</a>
   <form method="post" action="{{ url_for('salir') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Salir</button></form>
 </div></nav>
 {% endif %}

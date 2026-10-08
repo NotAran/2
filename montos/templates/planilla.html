@@ -7,20 +7,28 @@
     <input type="date" name="fecha" value="{{ caja[0].isoformat() }}" onchange="this.form.submit()" aria-label="Fecha">
     <div class="turnos">
       {% for c, nombre in turnos %}
-        <a href="{{ url_caja(c) }}" class="{{ 'activo' if c == caja }}">{{ nombre }}</a>
+        <a href="{{ url_caja(c) }}" class="{{ 'activo' if c == caja }}">{{ nombre }}<small>{{ horarios[loop.index0] }}</small></a>
       {% endfor %}
     </div>
     <input type="hidden" name="turno" value="{{ turno_slug(caja) }}">
   </form>
   <a class="flecha" href="{{ url_caja(caja_siguiente) }}" title="{{ nombre_caja(caja_siguiente) }}">Caja siguiente →</a>
+  {% if caja != en_curso %}<a class="flecha" href="{{ url_caja(en_curso) }}">Ir al turno en curso</a>{% endif %}
 </section>
 
-<h1>Caja {{ nombre_caja(caja) }}</h1>
+<h1>Caja {{ nombre_caja(caja) }}
+  {% if caja == en_curso %}<span class="etiqueta vivo">Turno en curso</span>{% elif cerrada %}<span class="etiqueta">Día cerrado</span>{% endif %}
+</h1>
+{% if bloqueada %}
+  <p class="aviso cerrado">Este día ya terminó (cerró a las 23:00 del {{ caja[0].strftime('%d/%m') }}). Solo el admin puede hacer cambios.</p>
+{% elif cerrada %}
+  <p class="aviso">Este día ya terminó. Como sos admin, igual podés hacer cambios.</p>
+{% endif %}
 <p class="sub">El <b>turno anterior</b> es el turno actual de la caja {{ nombre_caja(caja_previa) }}. En el <b>turno actual</b> cargá los montos de cada uno y apretá <b>Guardar</b>.</p>
 
 {% if not filas or not columnas %}
   <section class="card vacio">
-    {% if usuario.es_admin %}
+    {% if es_admin(usuario) %}
       La planilla no tiene {{ 'filas' if not filas else 'columnas' }}. Agregalas desde <a href="{{ url_for('admin') }}">Admin</a>.
     {% else %}
       El admin todavía no te asignó filas y columnas.
@@ -55,7 +63,7 @@
       <h2 style="margin:0">Turno actual</h2>
       <div style="display:flex;gap:8px">
         <a class="btn verde" href="{{ url_caja(caja, 'exportar') }}">Descargar Excel</a>
-        <button>Guardar</button>
+        {% if not bloqueada %}<button>Guardar</button>{% endif %}
       </div>
     </div>
     <div class="tabla">
@@ -73,7 +81,7 @@
             <td>{{ f.nombre }}</td>
             {% for c in columnas %}
               {% set celda = celdas.get((f.id, c.id)) %}
-              <td><input name="c_{{ f.id }}_{{ c.id }}" inputmode="decimal" autocomplete="off" placeholder="0,00"
+              <td><input name="c_{{ f.id }}_{{ c.id }}" {{ 'readonly' if bloqueada }} inputmode="decimal" autocomplete="off" placeholder="0,00"
                          aria-label="{{ f.nombre }} – {{ c.nombre }}"
                          value="{{ celda.centavos|numero if celda else '' }}"
                          {% if celda %}title="Último cambio: {{ celda.actualizado_por }} – {{ celda.actualizado }}"{% endif %}></td>
@@ -103,13 +111,13 @@
           </div>
           {% else %}
           <label>{{ nombre }}
-            <input name="x_{{ campo }}" inputmode="decimal" autocomplete="off" placeholder="0,00"
+            <input name="x_{{ campo }}" {{ 'readonly' if bloqueada }} inputmode="decimal" autocomplete="off" placeholder="0,00"
                    value="{{ extra.centavos|numero if extra else '' }}"
                    {% if extra %}title="Último cambio: {{ extra.actualizado_por }} – {{ extra.actualizado }}"{% endif %}>
           </label>
           {% endif %}
         {% endfor %}
-        <button>Guardar</button>
+        {% if not bloqueada %}<button>Guardar</button>{% endif %}
       </div>
     </section>
   </form>

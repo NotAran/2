@@ -6,9 +6,16 @@ todo se puede descargar en Excel.
 
 ## Cómo funciona
 
-- **3 cajas por día**, en este orden: Noche → Mañana → Tarde (y después la Noche
-  del día siguiente). Se elige la caja con la fecha y los botones de turno, o con
-  "Caja anterior / Caja siguiente".
+- **3 cajas por día**, en este orden:
+  - Noche: 23:00 a 07:00 (arranca a las 23:00 del día anterior)
+  - Mañana: 07:00 a 15:00
+  - Tarde: 15:00 a 23:00
+
+  Al entrar se abre la caja del turno en curso (hora de Argentina; se puede
+  cambiar con la variable `MONTOS_TZ`). Se cambia de caja con la fecha, los
+  botones de turno o "Caja anterior / Caja siguiente".
+- **Cierre del día**: a las 23:00, cuando termina la tarde, las 3 cajas de ese día
+  quedan cerradas. Solo el admin puede modificarlas después.
 - Cada caja es una planilla de **cuentas** (filas: Mercado, Naranja, Ualá,
   Personal, Brubank, Lemon, Prex, Arq, Binance) por **personas** (columnas:
   Paco, Antonio, Ibra; son solo columnas, no usuarios) y se divide en:
@@ -26,15 +33,19 @@ todo se puede descargar en Excel.
 - **Últimas cajas**: lista con turno anterior, turno actual, resultado y final de cada caja.
 - **Excel**: descarga la caja elegida (con los totales como fórmulas) y el historial.
 
-## Usuarios y admin
+## Usuarios y niveles
 
 - La primera vez que se abre la página pide crear la cuenta del **admin**.
-- El admin crea usuarios (todos los que quiera), les cambia la contraseña o los elimina.
+- Niveles: **admin**, **encargado** y **cajero**. Por ahora encargado y cajero
+  pueden hacer lo mismo: ven y cargan las filas y columnas que el admin les asigna.
+- El admin crea usuarios (todos los que quiera), elige su nivel, les cambia el
+  nombre o la contraseña, o los elimina. No puede cambiar su propio nivel.
+- Cada usuario elige **su nombre** (el que aparece en la página) en "Mi cuenta",
+  donde también puede cambiar su contraseña. Para ingresar se usa el usuario.
 - El admin agrega o quita filas y columnas. Cada columna puede sumar o restar.
   Si se quita una fila o columna que ya tiene montos, se oculta pero sus montos
-  siguen contando en los saldos (se puede reactivar).
-- El admin elige qué filas y columnas ve y carga cada usuario. Los totales de
-  la caja (turno anterior, turno actual y total) son siempre de toda la caja.
+  se conservan (se puede reactivar).
+- Los totales de la caja son siempre de toda la caja, aunque el usuario vea una parte.
 - Cada celda guarda quién la modificó por última vez y cuándo (se ve al pasar
   el mouse por encima).
 

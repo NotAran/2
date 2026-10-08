@@ -16,8 +16,9 @@ import io
 import os
 import secrets
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, flash, g, redirect, render_template, request, send_file, session, url_for
 from openpyxl import Workbook
@@ -26,10 +27,16 @@ from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION_ESQUEMA = 5
+VERSION_ESQUEMA = 6
 FILAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon", "Prex", "Arq", "Binance")
 COLUMNAS_INICIALES = (("Paco", 1), ("Antonio", 1), ("Ibra", 1))  # signo: suma o resta en el total
 TURNOS = (("noche", "Noche"), ("manana", "Mañana"), ("tarde", "Tarde"))  # orden de las cajas en el día
+# Horario de cada turno. La noche de un día arranca a las 23:00 del día anterior,
+# y el día termina (y sus cajas se cierran) a las 23:00, cuando termina la tarde.
+HORARIOS = ("23:00 a 07:00", "07:00 a 15:00", "15:00 a 23:00")
+HORA_CIERRE = time(23, 0)
+ZONA_HORARIA = ZoneInfo(os.environ.get("MONTOS_TZ", "America/Argentina/Buenos_Aires"))
+ROLES = (("admin", "Admin"), ("encargado", "Encargado"), ("cajero", "Cajero"))
 TURNO_POR_SLUG = {slug: i for i, (slug, _) in enumerate(TURNOS)}
 # Datos de cada caja que no suman en la caja, en el orden en que se muestran.
 # El saldo no se carga: se calcula como depósito − retiro.
@@ -65,7 +72,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre     TEXT    NOT NULL UNIQUE COLLATE NOCASE,
     clave_hash TEXT    NOT NULL,
-    es_admin   INTEGER NOT NULL DEFAULT 0
+    rol        TEXT    NOT NULL DEFAULT 'cajero',  -- clave en ROLES
+    nombre_visible TEXT  -- nombre que elige el usuario; si no hay, se usa el de ingreso
 );
 CREATE TABLE IF NOT EXISTS filas (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,6 +126,12 @@ def inicializar(db):
         db.execute("DROP TABLE IF EXISTS celdas")  # versión anterior: montos sin caja ni turno
     db.executescript(ESQUEMA)
     db.execute("DELETE FROM extras WHERE campo = 'saldo'")  # desde la versión 5 el saldo se calcula
+    columnas_usuarios = {r["name"] for r in db.execute("PRAGMA table_info(usuarios)")}
+    if "rol" not in columnas_usuarios:  # versiones anteriores: es_admin 1/0
+        db.execute("ALTER TABLE usuarios ADD COLUMN rol TEXT NOT NULL DEFAULT 'cajero'")
+        db.execute("UPDATE usuarios SET rol = 'admin' WHERE es_admin = 1")
+    if "nombre_visible" not in columnas_usuarios:
+        db.execute("ALTER TABLE usuarios ADD COLUMN nombre_visible TEXT")
     for tabla in ("filas", "columnas"):
         if "activo" not in {r["name"] for r in db.execute(f"PRAGMA table_info({tabla})")}:
             db.execute(f"ALTER TABLE {tabla} ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
@@ -213,6 +227,31 @@ def validar_clave(clave):
     return None
 
 
+@app.template_global()
+def es_admin(usuario):
+    return usuario is not None and usuario["rol"] == "admin"
+
+
+@app.template_global()
+def nombre_de(usuario):
+    """Nombre que se muestra: el que eligió el usuario, o su usuario de ingreso."""
+    return usuario["nombre_visible"] or usuario["nombre"]
+
+
+@app.template_global()
+def nombre_rol(rol):
+    return dict(ROLES).get(rol, rol)
+
+
+def limpiar_nombre_visible(texto):
+    return " ".join((texto or "").split())[:40] or None
+
+
+def ahora():
+    """Fecha y hora actual en la zona horaria del negocio."""
+    return datetime.now(ZONA_HORARIA)
+
+
 # --- Sesión, permisos y protección CSRF ----------------------------------------
 
 def usuario_actual():
@@ -241,7 +280,7 @@ def proteger():
         return None
     if usuario_actual() is None:
         return redirect(url_for("login"))
-    if endpoint.startswith("admin") and not usuario_actual()["es_admin"]:
+    if endpoint.startswith("admin") and not es_admin(usuario_actual()):
         abort(403)
     return None
 
@@ -278,24 +317,36 @@ def turno_slug(caja):
     return TURNOS[caja[1]][0]
 
 
-def ultima_caja():
-    r = get_db().execute("SELECT fecha, turno FROM celdas ORDER BY fecha DESC, turno DESC LIMIT 1").fetchone()
-    return (date.fromisoformat(r["fecha"]), r["turno"]) if r else (date.today(), 0)
+def caja_en_curso(momento=None):
+    """Caja del turno que está corriendo: noche 23–7, mañana 7–15, tarde 15–23."""
+    momento = momento or ahora()
+    hora, hoy = momento.hour, momento.date()
+    if hora >= 23:
+        return hoy + timedelta(days=1), 0  # la noche ya pertenece al día siguiente
+    if hora < 7:
+        return hoy, 0
+    return (hoy, 1) if hora < 15 else (hoy, 2)
+
+
+def dia_cerrado(caja, momento=None):
+    """El día de una caja termina a las 23:00 de su fecha; después solo el admin puede cambiarla."""
+    momento = momento or ahora()
+    return momento >= datetime.combine(caja[0], HORA_CIERRE, tzinfo=momento.tzinfo or ZONA_HORARIA)
 
 
 def caja_pedida(estricto=False):
-    """Caja de los parámetros fecha y turno; si faltan, la última con datos."""
+    """Caja de los parámetros fecha y turno; si faltan, la del turno en curso."""
     try:
         return date.fromisoformat(request.values.get("fecha", "")), TURNO_POR_SLUG[request.values.get("turno", "")]
     except (ValueError, KeyError):
         if estricto:
             abort(400, "Caja inválida.")
-        return ultima_caja()
+        return caja_en_curso()
 
 
 def permitidas(db, usuario):
     """Todas las filas y columnas (también las quitadas) que le corresponden al usuario."""
-    if usuario["es_admin"]:
+    if es_admin(usuario):
         filas = db.execute("SELECT * FROM filas ORDER BY orden, id").fetchall()
         columnas = db.execute("SELECT * FROM columnas ORDER BY orden, id").fetchall()
     else:
@@ -407,6 +458,10 @@ def planilla():
         turnos=[((caja[0], i), nombre) for i, (_, nombre) in enumerate(TURNOS)],
         historial=historial(db)[:15],
         campos_extras=EXTRAS,
+        horarios=HORARIOS,
+        en_curso=caja_en_curso(),
+        cerrada=dia_cerrado(caja),
+        bloqueada=dia_cerrado(caja) and not es_admin(usuario_actual()),
     )
 
 
@@ -428,9 +483,12 @@ def guardar():
     db = get_db()
     usuario = usuario_actual()
     caja = caja_pedida(estricto=True)
+    if dia_cerrado(caja) and not es_admin(usuario):
+        flash(f"El día {caja[0]:%d/%m/%Y} ya terminó: solo el admin puede hacer cambios.", "error")
+        return redirect(url_caja(caja))
     datos = armar_caja(db, usuario, caja)  # solo se guardan celdas que el usuario puede ver
     fecha, turno = caja[0].isoformat(), caja[1]
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
+    momento = ahora().strftime("%Y-%m-%d %H:%M")
     errores, cambios = [], 0
 
     for f in datos["filas"]:
@@ -454,7 +512,7 @@ def guardar():
                          centavos = excluded.centavos,
                          actualizado_por = excluded.actualizado_por,
                          actualizado = excluded.actualizado""",
-                    (*clave, centavos, usuario["nombre"], ahora),
+                    (*clave, centavos, nombre_de(usuario), momento),
                 )
             cambios += 1
 
@@ -474,7 +532,7 @@ def guardar():
                      centavos = excluded.centavos,
                      actualizado_por = excluded.actualizado_por,
                      actualizado = excluded.actualizado""",
-                (fecha, turno, campo, centavos, usuario["nombre"], ahora),
+                (fecha, turno, campo, centavos, nombre_de(usuario), momento),
             )
         cambios += 1
 
@@ -597,8 +655,8 @@ def setup():
         if not error:
             db = get_db()
             cur = db.execute(
-                "INSERT INTO usuarios (nombre, clave_hash, es_admin) VALUES (?, ?, 1)",
-                (nombre, generate_password_hash(clave)),
+                "INSERT INTO usuarios (nombre, clave_hash, rol, nombre_visible) VALUES (?, ?, 'admin', ?)",
+                (nombre, generate_password_hash(clave), limpiar_nombre_visible(request.form.get("nombre_visible"))),
             )
             db.commit()
             session.clear()
@@ -628,6 +686,32 @@ def salir():
     return redirect(url_for("login"))
 
 
+@app.route("/cuenta", methods=["GET", "POST"])
+def cuenta():
+    """Cada usuario elige su nombre y puede cambiar su contraseña."""
+    usuario = usuario_actual()
+    if request.method == "POST":
+        db = get_db()
+        nueva = request.form.get("clave_nueva", "")
+        if nueva:
+            if not check_password_hash(usuario["clave_hash"], request.form.get("clave_actual", "")):
+                flash("La contraseña actual no es correcta.", "error")
+                return redirect(url_for("cuenta"))
+            error = validar_clave(nueva)
+            if error:
+                flash(error, "error")
+                return redirect(url_for("cuenta"))
+            db.execute("UPDATE usuarios SET clave_hash = ? WHERE id = ?", (generate_password_hash(nueva), usuario["id"]))
+        db.execute(
+            "UPDATE usuarios SET nombre_visible = ? WHERE id = ?",
+            (limpiar_nombre_visible(request.form.get("nombre_visible")), usuario["id"]),
+        )
+        db.commit()
+        flash("Tus datos se guardaron.", "ok")
+        return redirect(url_for("cuenta"))
+    return render_template("cuenta.html")
+
+
 # --- Panel de admin -------------------------------------------------------------
 
 @app.get("/admin")
@@ -644,7 +728,10 @@ def admin():
     }
     return render_template(
         "admin.html",
-        usuarios=db.execute("SELECT * FROM usuarios ORDER BY es_admin DESC, nombre").fetchall(),
+        usuarios=db.execute(
+            "SELECT * FROM usuarios ORDER BY CASE rol WHEN 'admin' THEN 0 WHEN 'encargado' THEN 1 ELSE 2 END, nombre"
+        ).fetchall(),
+        roles=ROLES,
         permisos=permisos,
         **listas,
     )
@@ -657,15 +744,18 @@ def volver_admin(seccion):
 @app.post("/admin/usuarios")
 def admin_crear_usuario():
     nombre, clave = request.form.get("nombre", "").strip(), request.form.get("clave", "")
-    error = validar_usuario(nombre, clave)
+    rol = request.form.get("rol", "cajero")
+    error = validar_usuario(nombre, clave) or (None if rol in dict(ROLES) else "Nivel inválido.")
     if not error:
         db = get_db()
         try:
             db.execute(
-                "INSERT INTO usuarios (nombre, clave_hash) VALUES (?, ?)", (nombre, generate_password_hash(clave))
+                "INSERT INTO usuarios (nombre, clave_hash, rol, nombre_visible) VALUES (?, ?, ?, ?)",
+                (nombre, generate_password_hash(clave), rol, limpiar_nombre_visible(request.form.get("nombre_visible"))),
             )
             db.commit()
-            flash(f"Usuario «{nombre}» creado. Ahora asignale filas y columnas.", "ok")
+            extra = "" if rol == "admin" else " Ahora asignale filas y columnas."
+            flash(f"Usuario «{nombre}» ({nombre_rol(rol).lower()}) creado.{extra}", "ok")
         except sqlite3.IntegrityError:
             error = "Ya existe un usuario con ese nombre."
     if error:
@@ -676,7 +766,9 @@ def admin_crear_usuario():
 @app.post("/admin/usuarios/<int:uid>/eliminar")
 def admin_eliminar_usuario(uid):
     db = get_db()
-    if db.execute("DELETE FROM usuarios WHERE id = ? AND es_admin = 0", (uid,)).rowcount == 0:
+    if uid == usuario_actual()["id"] or db.execute(
+        "DELETE FROM usuarios WHERE id = ? AND rol != 'admin'", (uid,)
+    ).rowcount == 0:
         abort(404)
     db.commit()
     flash("Usuario eliminado.", "ok")
@@ -698,10 +790,30 @@ def admin_cambiar_clave(uid):
     return volver_admin("usuarios")
 
 
+@app.post("/admin/usuarios/<int:uid>/datos")
+def admin_datos_usuario(uid):
+    """El admin cambia el nivel y el nombre visible de un usuario (su propio nivel no)."""
+    db = get_db()
+    u = db.execute("SELECT * FROM usuarios WHERE id = ?", (uid,)).fetchone()
+    if not u:
+        abort(404)
+    rol = request.form.get("rol", u["rol"])
+    if rol not in dict(ROLES) or (uid == usuario_actual()["id"] and rol != u["rol"]):
+        flash("No podés cambiar tu propio nivel.", "error")
+        return volver_admin("usuarios")
+    db.execute(
+        "UPDATE usuarios SET rol = ?, nombre_visible = ? WHERE id = ?",
+        (rol, limpiar_nombre_visible(request.form.get("nombre_visible")), uid),
+    )
+    db.commit()
+    flash(f"Datos de «{u['nombre']}» guardados.", "ok")
+    return volver_admin("usuarios")
+
+
 @app.post("/admin/usuarios/<int:uid>/permisos")
 def admin_permisos(uid):
     db = get_db()
-    if not db.execute("SELECT 1 FROM usuarios WHERE id = ? AND es_admin = 0", (uid,)).fetchone():
+    if not db.execute("SELECT 1 FROM usuarios WHERE id = ? AND rol != 'admin'", (uid,)).fetchone():
         abort(404)
     for tabla, campo in (("filas", "fila_id"), ("columnas", "columna_id")):
         # el formulario solo muestra las activas: las quitadas conservan su permiso (y su historial)

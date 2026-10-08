@@ -1,5 +1,6 @@
 import io
-from datetime import date
+import sqlite3
+from datetime import date, datetime
 
 import pytest
 from openpyxl import load_workbook
@@ -7,8 +8,12 @@ from openpyxl import load_workbook
 import app as montos
 
 
+AHORA = datetime(2026, 10, 8, 5, 0, tzinfo=montos.ZONA_HORARIA)  # jueves 08/10, turno noche en curso
+
+
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(montos, "ahora", lambda: AHORA)
     montos.app.config.update(TESTING=True, DATABASE=str(tmp_path / "test.db"))
     with montos.app.test_client() as c:
         yield c
@@ -162,6 +167,50 @@ def test_usuario_ve_y_carga_solo_lo_asignado(client):
     assert "todavía no te asignó" in client.get("/").get_data(as_text=True)
 
 
+def test_niveles_y_nombres(client):
+    crear_admin(client)
+    post(client, "/admin/usuarios", nombre="lucia", clave="clave123", rol="encargado", nombre_visible="Lucía Gómez")
+    post(client, "/admin/usuarios", nombre="pepe", clave="clave123")
+    with montos.app.app_context():
+        roles = {r["nombre"]: (r["rol"], r["nombre_visible"]) for r in montos.get_db().execute("SELECT * FROM usuarios")}
+    assert roles == {"admin": ("admin", None), "lucia": ("encargado", "Lucía Gómez"), "pepe": ("cajero", None)}
+    assert "Nivel inválido" in post(client, "/admin/usuarios", nombre="x123", clave="clave123", rol="jefe").get_data(as_text=True)
+
+    # el admin cambia nivel y nombre de otro, pero no su propio nivel
+    post(client, f"/admin/usuarios/{ids('usuarios')['pepe']}/datos", rol="encargado", nombre_visible="Pepe")
+    r = post(client, f"/admin/usuarios/{ids('usuarios')['admin']}/datos", rol="cajero")
+    assert "No podés cambiar tu propio nivel" in r.get_data(as_text=True)
+    with montos.app.app_context():
+        db = montos.get_db()
+        assert db.execute("SELECT rol, nombre_visible FROM usuarios WHERE nombre = 'pepe'").fetchone()[:] == ("encargado", "Pepe")
+        assert db.execute("SELECT rol FROM usuarios WHERE nombre = 'admin'").fetchone()[0] == "admin"
+
+    # cada uno elige su nombre en Mi cuenta, y es el que queda en los cambios
+    ingresar(client, "lucia", "clave123")
+    post(client, "/cuenta", nombre_visible="  Lu  ")
+    assert "Lu · Encargado" in client.get("/cuenta").get_data(as_text=True)
+    assert "La contraseña actual no es correcta" in post(
+        client, "/cuenta", nombre_visible="Lu", clave_actual="mal", clave_nueva="nueva123"
+    ).get_data(as_text=True)
+    post(client, "/cuenta", nombre_visible="Lu", clave_actual="clave123", clave_nueva="nueva123")
+    assert "Cajas por turno" in ingresar(client, "lucia", "nueva123").get_data(as_text=True)
+
+
+def test_migra_es_admin_a_niveles(tmp_path, monkeypatch):
+    ruta = tmp_path / "vieja.db"
+    db = sqlite3.connect(ruta)
+    db.executescript("""
+        CREATE TABLE usuarios (id INTEGER PRIMARY KEY, nombre TEXT, clave_hash TEXT, es_admin INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO usuarios (nombre, clave_hash, es_admin) VALUES ('jefe', 'x', 1), ('caja', 'x', 0);
+        PRAGMA user_version = 5;
+    """)
+    db.close()
+    montos.app.config.update(DATABASE=str(ruta))
+    with montos.app.app_context():
+        r = montos.get_db().execute("SELECT nombre, rol FROM usuarios ORDER BY id").fetchall()
+    assert [tuple(x) for x in r] == [("jefe", "admin"), ("caja", "cajero")]
+
+
 def test_eliminar_usuario_y_no_al_admin(client):
     crear_admin(client)
     post(client, "/admin/usuarios", nombre="juan", clave="clave123")
@@ -238,10 +287,53 @@ def test_columna_que_resta(client):
     assert d["totales"]["actual"] == 74950
 
 
-def test_sin_parametros_muestra_la_ultima_caja_con_datos(client):
+def test_sin_parametros_muestra_el_turno_en_curso(client):
     crear_admin(client)
-    cargar(client, "2026-10-05", "tarde", Mercado__Paco="10")
-    assert "Lunes 05/10/2026 – Tarde" in client.get("/").get_data(as_text=True)
+    pagina = client.get("/").get_data(as_text=True)
+    assert "Jueves 08/10/2026 – Noche" in pagina and "Turno en curso" in pagina
+
+
+@pytest.mark.parametrize("hora,caja_esperada", [
+    ("2026-10-08 06:59", ("2026-10-08", 0)),  # noche: 23 a 7
+    ("2026-10-08 07:00", ("2026-10-08", 1)),  # mañana: 7 a 15
+    ("2026-10-08 14:59", ("2026-10-08", 1)),
+    ("2026-10-08 15:00", ("2026-10-08", 2)),  # tarde: 15 a 23
+    ("2026-10-08 22:59", ("2026-10-08", 2)),
+    ("2026-10-08 23:00", ("2026-10-09", 0)),  # la noche ya es del día siguiente
+])
+def test_caja_en_curso(hora, caja_esperada):
+    momento = datetime.strptime(hora, "%Y-%m-%d %H:%M").replace(tzinfo=montos.ZONA_HORARIA)
+    assert montos.caja_en_curso(momento) == (date.fromisoformat(caja_esperada[0]), caja_esperada[1])
+
+
+def test_dia_cerrado():
+    def momento(texto):
+        return datetime.strptime(texto, "%Y-%m-%d %H:%M").replace(tzinfo=montos.ZONA_HORARIA)
+    jueves = date(2026, 10, 8)
+    assert not montos.dia_cerrado((jueves, 0), momento("2026-10-08 22:59"))
+    assert montos.dia_cerrado((jueves, 0), momento("2026-10-08 23:00"))
+    assert montos.dia_cerrado((jueves, 2), momento("2026-10-09 10:00"))
+    assert not montos.dia_cerrado((date(2026, 10, 9), 0), momento("2026-10-08 23:30"))  # noche del viernes en curso
+
+
+def test_dia_terminado_solo_lo_cambia_el_admin(client):
+    crear_admin(client)
+    post(client, "/admin/usuarios", nombre="cajero", clave="clave123", rol="cajero")
+    f, c = ids("filas"), ids("columnas")
+    post(client, f"/admin/usuarios/{ids('usuarios')['cajero']}/permisos", filas=[f["Mercado"]], columnas=[c["Paco"]])
+
+    ingresar(client, "cajero", "clave123")
+    r = cargar(client, "2026-10-07", "tarde", Mercado__Paco="100")  # día anterior: cerrado
+    assert "solo el admin puede hacer cambios" in r.get_data(as_text=True)
+    assert caja("2026-10-07", "tarde")["totales"]["actual"] == 0
+    pagina = client.get("/?fecha=2026-10-07&turno=tarde").get_data(as_text=True)
+    assert "readonly" in pagina and "Este día ya terminó" in pagina
+    cargar(client, "2026-10-08", "manana", Mercado__Paco="100")  # el día de hoy sigue abierto
+    assert caja("2026-10-08", "manana")["totales"]["actual"] == 10000
+
+    ingresar(client, "admin", "secreto1")
+    cargar(client, "2026-10-07", "tarde", Mercado__Paco="100")
+    assert caja("2026-10-07", "tarde")["totales"]["actual"] == 10000
 
 
 def test_vaciar_celda_la_borra(client):

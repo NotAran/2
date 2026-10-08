@@ -2,16 +2,25 @@
 {% block titulo %}Admin{% endblock %}
 {% block contenido %}
 <h1>Panel de admin</h1>
-<p class="sub">Creá usuarios, armá la planilla de las cajas y elegí qué filas y columnas ve y carga cada usuario. Si quitás una fila o columna que ya tiene montos, se oculta pero sus montos siguen contando en los saldos.</p>
+<p class="sub">Creá usuarios (admin, encargado o cajero), armá la planilla de las cajas y elegí qué filas y columnas ve y carga cada usuario. Si quitás una fila o columna que ya tiene montos, se oculta pero sus montos siguen contando en los saldos.</p>
 
-<div class="admin-grid">
-  <section class="card" id="usuarios">
-    <h2>Usuarios</h2>
-    <ul class="lista">
-      {% for u in usuarios %}
-        <li>
-          <span class="nombre">{{ u.nombre }}</span>
-          {% if u.es_admin %}<span class="etiqueta">admin</span>{% endif %}
+<section class="card" id="usuarios">
+  <h2>Usuarios</h2>
+  <div class="usuarios">
+    <div class="u-fila u-enc"><span>Usuario</span><span>Nombre y nivel</span><span></span></div>
+    {% for u in usuarios %}
+      <div class="u-fila">
+        <span class="u-login">{{ u.nombre }}{% if u.id == usuario.id %} <span class="etiqueta">vos</span>{% endif %}</span>
+        <form class="u-datos" method="post" action="{{ url_for('admin_datos_usuario', uid=u.id) }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input name="nombre_visible" maxlength="40" value="{{ u.nombre_visible or '' }}" placeholder="{{ u.nombre }}" aria-label="Nombre de {{ u.nombre }}">
+          <select name="rol" aria-label="Nivel de {{ u.nombre }}" {{ 'disabled' if u.id == usuario.id }}>
+            {% for clave, nombre in roles %}<option value="{{ clave }}" {{ 'selected' if u.rol == clave }}>{{ nombre }}</option>{% endfor %}
+          </select>
+          {% if u.id == usuario.id %}<input type="hidden" name="rol" value="{{ u.rol }}">{% endif %}
+          <button class="sec">Guardar</button>
+        </form>
+        <span class="u-acciones">
           <details>
             <summary>Contraseña</summary>
             <form method="post" action="{{ url_for('admin_cambiar_clave', uid=u.id) }}" style="margin-top:6px">
@@ -20,23 +29,29 @@
               <button class="sec">Cambiar</button>
             </form>
           </details>
-          {% if not u.es_admin %}
+          {% if u.rol != 'admin' %}
             <form method="post" action="{{ url_for('admin_eliminar_usuario', uid=u.id) }}" data-confirm="¿Eliminar al usuario {{ u.nombre }}?">
               <input type="hidden" name="csrf" value="{{ csrf }}">
               <button class="peligro" title="Eliminar usuario">Eliminar</button>
             </form>
           {% endif %}
-        </li>
-      {% endfor %}
-    </ul>
-    <form class="alta" method="post" action="{{ url_for('admin_crear_usuario') }}">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input name="nombre" placeholder="Usuario nuevo" required autocomplete="off">
-      <input type="password" name="clave" placeholder="Contraseña" required minlength="6" autocomplete="new-password">
-      <button>Crear usuario</button>
-    </form>
-  </section>
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+  <form class="alta" method="post" action="{{ url_for('admin_crear_usuario') }}" style="margin-top:14px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="nombre" placeholder="Usuario nuevo (para ingresar)" required autocomplete="off">
+    <input name="nombre_visible" placeholder="Nombre (opcional)" maxlength="40" autocomplete="off">
+    <input type="password" name="clave" placeholder="Contraseña" required minlength="6" autocomplete="new-password">
+    <select name="rol" aria-label="Nivel">
+      {% for clave, nombre in roles %}<option value="{{ clave }}" {{ 'selected' if clave == 'cajero' }}>{{ nombre }}</option>{% endfor %}
+    </select>
+    <button>Crear usuario</button>
+  </form>
+</section>
 
+<div class="admin-grid">
   <section class="card" id="filas">
     <h2>Filas (cuentas)</h2>
     <ul class="lista">
@@ -120,10 +135,10 @@
 </div>
 
 <h2 style="margin-top:26px">Qué ve cada usuario</h2>
-{% for u in usuarios if not u.es_admin %}
+{% for u in usuarios if u.rol != 'admin' %}
   <form class="card" id="permisos-{{ u.id }}" method="post" action="{{ url_for('admin_permisos', uid=u.id) }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <h2>{{ u.nombre }}</h2>
+    <h2>{{ nombre_de(u) }} <span class="etiqueta">{{ nombre_rol(u.rol) }}</span></h2>
     <div class="campo">Filas</div>
     <div class="checks">
       {% for f in filas %}
