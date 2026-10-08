@@ -19,7 +19,9 @@ todo se puede descargar en Excel.
   - **Total caja** = turno anterior + turno actual. Pasa a ser el turno anterior
     de la caja siguiente.
 - **Otros datos del turno**: Depósito, Retiro, Bono, Saldo y Bajada, un monto de cada uno por caja.
-  Se guardan con la caja pero no entran en las sumas.
+  No entran en las sumas de la caja. El saldo se calcula solo: depósito − retiro.
+- **Total + bajada**: se muestra debajo del total de la caja (total caja + bajada).
+  Es solo informativo: la caja siguiente arranca con el total caja.
 - Si se corrige una caja vieja, los saldos de las cajas siguientes se actualizan solos.
 - **Últimas cajas**: lista con el movimiento de cada turno y el saldo al cierre.
 - **Excel**: descarga la caja elegida (con los totales como fórmulas) y el historial.

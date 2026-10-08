@@ -33,6 +33,11 @@
     <div class="kpi"><div class="k">Turno actual</div><div class="v {{ 'neg' if totales.actual < 0 }}">{{ totales.actual|dinero }}</div></div>
     <span class="op">=</span>
     <div class="kpi destacado"><div class="k">Total caja</div><div class="v {{ 'pos' if totales.caja >= 0 else 'neg' }}">{{ totales.caja|dinero }}</div></div>
+    <div class="kpi con-bajada">
+      <div class="k">Total + bajada</div>
+      <div class="v {{ 'neg' if totales.con_bajada < 0 }}">{{ totales.con_bajada|dinero }}</div>
+      <div class="detalle">{{ totales.caja|dinero }} + bajada {{ (extras.bajada.centavos if extras.bajada else 0)|dinero }}</div>
+    </div>
   </section>
   {% if total_grilla != totales.actual %}
     <p class="nota">Los totales de arriba son de toda la caja; abajo ves solo las filas y columnas que tenés asignadas.</p>
@@ -85,15 +90,21 @@
 
     <section class="card">
       <h2>Otros datos del turno</h2>
-      <p class="nota" style="margin:0 0 12px">No entran en las sumas de la caja.</p>
+      <p class="nota" style="margin:0 0 12px">No entran en las sumas de la caja. El saldo se calcula solo: depósito − retiro.</p>
       <div class="extras">
         {% for campo, nombre in campos_extras %}
           {% set extra = extras.get(campo) %}
+          {% if campo == 'saldo' %}
+          <div class="campo">{{ nombre }}
+            <output title="Depósito − retiro" class="calculado {{ 'neg' if saldo < 0 }}">{{ saldo|dinero }}</output>
+          </div>
+          {% else %}
           <label>{{ nombre }}
             <input name="x_{{ campo }}" inputmode="decimal" autocomplete="off" placeholder="0,00"
                    value="{{ extra.centavos|numero if extra else '' }}"
                    {% if extra %}title="Último cambio: {{ extra.actualizado_por }} – {{ extra.actualizado }}"{% endif %}>
           </label>
+          {% endif %}
         {% endfor %}
         <button>Guardar</button>
       </div>

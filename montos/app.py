@@ -26,13 +26,15 @@ from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION_ESQUEMA = 4
+VERSION_ESQUEMA = 5
 FILAS_INICIALES = ("Mercado", "Naranja", "Ualá", "Personal", "Brubank", "Lemon", "Prex", "Arq", "Binance")
 COLUMNAS_INICIALES = (("Paco", 1), ("Antonio", 1), ("Ibra", 1))  # signo: suma o resta en el total
 TURNOS = (("noche", "Noche"), ("manana", "Mañana"), ("tarde", "Tarde"))  # orden de las cajas en el día
 TURNO_POR_SLUG = {slug: i for i, (slug, _) in enumerate(TURNOS)}
-# Datos de cada caja que no suman, en el orden en que se muestran
+# Datos de cada caja que no suman en la caja, en el orden en que se muestran.
+# El saldo no se carga: se calcula como depósito − retiro.
 EXTRAS = (("deposito", "Depósito"), ("retiro", "Retiro"), ("bono", "Bono"), ("saldo", "Saldo"), ("bajada", "Bajada"))
+EXTRAS_CALCULADOS = {"saldo"}
 DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 FORMATO_MONEDA = '"$"#,##0.00;[Red]-"$"#,##0.00'
 
@@ -115,6 +117,7 @@ def inicializar(db):
     if db.execute("PRAGMA user_version").fetchone()[0] == 2:
         db.execute("DROP TABLE IF EXISTS celdas")  # versión anterior: montos sin caja ni turno
     db.executescript(ESQUEMA)
+    db.execute("DELETE FROM extras WHERE campo = 'saldo'")  # desde la versión 5 el saldo se calcula
     for tabla in ("filas", "columnas"):
         if "activo" not in {r["name"] for r in db.execute(f"PRAGMA table_info({tabla})")}:
             db.execute(f"ALTER TABLE {tabla} ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
@@ -319,7 +322,8 @@ def armar_caja(db, usuario, caja):
     - Total caja = turno anterior + turno actual.
     La grilla muestra las filas y columnas asignadas al usuario: las activas, y las
     quitadas solo si tienen montos en esta caja. Los extras (depósito, retiro, bono,
-    saldo, bajada) no entran en ninguna suma.
+    bajada) no entran en las sumas de la caja; saldo = depósito − retiro y
+    total + bajada = total caja + bajada (no pasa a la caja siguiente).
     """
     fecha, turno = caja[0].isoformat(), caja[1]
     filas_ok, columnas_ok = permitidas(db, usuario)
@@ -342,6 +346,11 @@ def armar_caja(db, usuario, caja):
         celda = celdas.get((f["id"], c["id"]))
         return celda["centavos"] if celda else 0
 
+    extras = {r["campo"]: r for r in db.execute("SELECT * FROM extras WHERE fecha = ? AND turno = ?", (fecha, turno))}
+
+    def monto_extra(campo):
+        return extras[campo]["centavos"] if campo in extras else 0
+
     total_fila = {f["id"]: sum(valor(f, c) * c["signo"] for c in columnas) for f in filas}
     return {
         "caja": caja,
@@ -351,10 +360,14 @@ def armar_caja(db, usuario, caja):
         "total_fila": total_fila,
         "total_columna": {c["id"]: sum(valor(f, c) for f in filas) for c in columnas},
         "total_grilla": sum(total_fila.values()),
-        "totales": {"anterior": anterior, "actual": actual, "caja": anterior + actual},
-        "extras": {
-            r["campo"]: r for r in db.execute("SELECT * FROM extras WHERE fecha = ? AND turno = ?", (fecha, turno))
+        "totales": {
+            "anterior": anterior,
+            "actual": actual,
+            "caja": anterior + actual,
+            "con_bajada": anterior + actual + monto_extra("bajada"),
         },
+        "extras": extras,
+        "saldo": monto_extra("deposito") - monto_extra("retiro"),
     }
 
 
@@ -435,7 +448,7 @@ def guardar():
             cambios += 1
 
     for campo, nombre in EXTRAS:
-        if f"x_{campo}" not in request.form:
+        if campo in EXTRAS_CALCULADOS or f"x_{campo}" not in request.form:
             continue
         hay_cambio, centavos = leer_cambio(request.form[f"x_{campo}"], datos["extras"].get(campo), nombre, errores)
         if not hay_cambio:
@@ -519,11 +532,15 @@ def exportar():
     ws.cell(row=r + 1, column=2, value=f"={l_total}{fila_total}" if completa else totales["actual"] / 100)
     ws.cell(row=r + 2, column=1, value="Total caja").font = Font(bold=True)
     ws.cell(row=r + 2, column=2, value=f"=B{r}+B{r + 1}").font = Font(bold=True)
-    ws.cell(row=r + 4, column=1, value="Otros datos (no suman)").font = Font(bold=True)
-    for k, (campo, nombre) in enumerate(EXTRAS, start=r + 5):
+    ws.cell(row=r + 5, column=1, value="Otros datos (no suman en la caja)").font = Font(bold=True)
+    fila_extra = {campo: k for k, (campo, _) in enumerate(EXTRAS, start=r + 6)}
+    for campo, nombre in EXTRAS:
         extra = datos["extras"].get(campo)
-        ws.cell(row=k, column=1, value=nombre)
-        ws.cell(row=k, column=2, value=extra["centavos"] / 100 if extra else None)
+        ws.cell(row=fila_extra[campo], column=1, value=nombre)
+        ws.cell(row=fila_extra[campo], column=2, value=extra["centavos"] / 100 if extra else None)
+    ws.cell(row=fila_extra["saldo"], column=2, value=f"=B{fila_extra['deposito']}-B{fila_extra['retiro']}")
+    ws.cell(row=r + 3, column=1, value="Total + bajada")
+    ws.cell(row=r + 3, column=2, value=f"=B{r + 2}+B{fila_extra['bajada']}")
     for fila in ws.iter_rows(min_row=4, min_col=2, max_col=col_total):
         for c in fila:
             c.number_format = FORMATO_MONEDA

@@ -99,3 +99,7 @@ details.quitadas { margin: -4px 0 14px; }
 details.quitadas .lista { margin: 6px 0 0; }
 .extras { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
 .extras input { text-align: right; font-variant-numeric: tabular-nums; font-size: 1.05rem; }
+.resumen .con-bajada { grid-column: 5; }
+.kpi .detalle { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+.extras output.calculado { display: block; padding: 8px 10px; border-radius: 7px; border: 1px dashed var(--border); text-align: right; font-variant-numeric: tabular-nums; font-size: 1.05rem; font-weight: 600; color: var(--text); }
+.extras output.calculado.neg { color: var(--bad); }
